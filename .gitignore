@@ -140,3 +140,4 @@ vite.config.ts.timestamp-*
 .idea
 /backend/.venv/
 /frontend/.claude
+/backend/cdk.context.json
