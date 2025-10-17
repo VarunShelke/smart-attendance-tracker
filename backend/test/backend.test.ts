@@ -1,0 +1,3 @@
+test('SQS Queue Created', () => {
+
+});
