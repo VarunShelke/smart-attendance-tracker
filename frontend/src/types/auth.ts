@@ -1,0 +1,27 @@
+export interface SignupFormData {
+  email: string;
+  password: string;
+  confirmPassword: string;
+  firstName: string;
+  lastName: string;
+}
+
+export interface SignupFormErrors {
+  email?: string;
+  password?: string;
+  confirmPassword?: string;
+  firstName?: string;
+  lastName?: string;
+  general?: string;
+}
+
+export interface AuthResponse {
+  success: boolean;
+  message?: string;
+  userId?: string;
+}
+
+export interface CognitoError {
+  name: string;
+  message: string;
+}
