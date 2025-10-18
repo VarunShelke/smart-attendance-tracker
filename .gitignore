@@ -141,3 +141,4 @@ vite.config.ts.timestamp-*
 /backend/.venv/
 /frontend/.claude
 /backend/cdk.context.json
+/credentials.txt

@@ -1,12 +1,11 @@
 import React from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import Input from '../ui/Input';
 import Button from '../ui/Button';
 import Alert from '../ui/Alert';
 import { useSignupForm } from '../../hooks/useSignupForm';
 
 const SignupForm: React.FC = () => {
-  const navigate = useNavigate();
   const {
     formData,
     errors,
@@ -16,16 +15,6 @@ const SignupForm: React.FC = () => {
     handleSubmit,
     clearError,
   } = useSignupForm();
-
-  React.useEffect(() => {
-    if (isSuccess) {
-      // Redirect to a success page or login page after successful signup
-      // For now, you can customize this behavior
-      setTimeout(() => {
-        navigate('/login');
-      }, 2000);
-    }
-  }, [isSuccess, navigate]);
 
   return (
     <div className="w-full max-w-md">
@@ -49,7 +38,7 @@ const SignupForm: React.FC = () => {
           <div className="mb-6">
             <Alert
               type="success"
-              message="Account created successfully! Redirecting to login..."
+              message="Account created successfully! Redirecting to verification..."
             />
           </div>
         )}
