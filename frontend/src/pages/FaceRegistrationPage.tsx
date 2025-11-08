@@ -27,10 +27,21 @@ const FaceRegistrationPage: React.FC = () => {
 
             // If password is available (coming from signup flow), auto-login
             if (password) {
-                await signIn({
-                    username: email,
-                    password: password,
-                });
+                try {
+                    await signIn({
+                        username: email,
+                        password: password,
+                    });
+                } catch (signInError: any) {
+                    // If already signed in, just continue (this can happen if user has an active session)
+                    if (signInError.name === 'UserAlreadyAuthenticatedException' ||
+                        signInError.name === 'NotAuthorizedException' && signInError.message?.includes('already')) {
+                        console.log('User already authenticated, continuing...');
+                    } else {
+                        // For other errors, rethrow
+                        throw signInError;
+                    }
+                }
             }
 
             // Refresh user data to get updated faceRegistered attribute
@@ -56,10 +67,21 @@ const FaceRegistrationPage: React.FC = () => {
 
             // If password is available (coming from signup flow), auto-login
             if (password) {
-                await signIn({
-                    username: email,
-                    password: password,
-                });
+                try {
+                    await signIn({
+                        username: email,
+                        password: password,
+                    });
+                } catch (signInError: any) {
+                    // If already signed in, just continue (this can happen if user has an active session)
+                    if (signInError.name === 'UserAlreadyAuthenticatedException' ||
+                        signInError.name === 'NotAuthorizedException' && signInError.message?.includes('already')) {
+                        console.log('User already authenticated, continuing...');
+                    } else {
+                        // For other errors, rethrow
+                        throw signInError;
+                    }
+                }
             }
 
             // Refresh user data
