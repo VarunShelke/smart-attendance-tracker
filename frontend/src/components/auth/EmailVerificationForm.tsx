@@ -7,9 +7,11 @@ import {useVerifyEmail} from '../../hooks/useVerifyEmail';
 
 interface EmailVerificationFormProps {
     email: string;
+    password?: string;
+    userId?: string;
 }
 
-const EmailVerificationForm: React.FC<EmailVerificationFormProps> = ({email}) => {
+const EmailVerificationForm: React.FC<EmailVerificationFormProps> = ({email, password, userId}) => {
     const navigate = useNavigate();
     const {
         formData,
@@ -25,16 +27,28 @@ const EmailVerificationForm: React.FC<EmailVerificationFormProps> = ({email}) =>
         clearError,
     } = useVerifyEmail(email);
 
-    // Redirect to login page after successful verification
+    // Redirect to face registration or login page after successful verification
     useEffect(() => {
         if (isSuccess) {
             setTimeout(() => {
-                navigate('/login', {
-                    state: {verificationSuccess: true},
-                });
+                // If we have password and userId, redirect to face registration
+                if (password && userId) {
+                    navigate('/face-registration', {
+                        state: {
+                            email,
+                            password,
+                            userId,
+                        },
+                    });
+                } else {
+                    // Otherwise, redirect to login (fallback)
+                    navigate('/login', {
+                        state: {verificationSuccess: true},
+                    });
+                }
             }, 2000);
         }
-    }, [isSuccess, navigate]);
+    }, [isSuccess, navigate, email, password, userId]);
 
     // Mask email for privacy (show first char and domain)
     const maskEmail = (email: string): string => {
