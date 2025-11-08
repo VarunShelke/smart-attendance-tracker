@@ -143,9 +143,10 @@ export const useFaceRegistration = (): UseFaceRegistrationReturn => {
             const blob = await response.blob();
 
             // Upload to S3 with userId as filename
+            // The path uses {identity_id} which AWS Amplify automatically replaces with the Cognito Identity ID
             const filename = `${userId}.jpg`;
             const result = await uploadData({
-                path: `face-registrations/${filename}`,
+                path: ({identityId}) => `face-registrations/${identityId}/${filename}`,
                 data: blob,
                 options: {
                     contentType: 'image/jpeg',

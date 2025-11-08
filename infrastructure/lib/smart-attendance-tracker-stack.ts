@@ -4,10 +4,12 @@ import * as cognito from "aws-cdk-lib/aws-cognito";
 import * as amplify from "aws-cdk-lib/aws-amplify";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as lambda from "aws-cdk-lib/aws-lambda";
+import * as iam from "aws-cdk-lib/aws-iam";
 
 export class SmartAttendanceTrackerStack extends cdk.Stack {
     public readonly userPool: cognito.UserPool;
     public readonly userPoolClient: cognito.UserPoolClient;
+    public readonly identityPool: cognito.CfnIdentityPool;
     public readonly amplifyApp: amplify.CfnApp;
     public readonly studentImagesBucket: s3.Bucket;
     public readonly registerStudentFaceLambda: lambda.Function;
@@ -41,6 +43,13 @@ export class SmartAttendanceTrackerStack extends cdk.Stack {
                     mutable: true,
                 },
             },
+            customAttributes: {
+                faceRegistered: new cognito.StringAttribute({
+                    minLen: 4,
+                    maxLen: 5,
+                    mutable: true,
+                }),
+            },
             passwordPolicy: {
                 minLength: 8,
                 requireLowercase: true,
@@ -55,6 +64,34 @@ export class SmartAttendanceTrackerStack extends cdk.Stack {
                 sms: false,
                 otp: true,
             },
+        });
+
+        // Create S3 bucket first (needed for IAM policies)
+        this.studentImagesBucket = new s3.Bucket(this, 'StudentImagesBucket', {
+            versioned: false,
+            encryption: s3.BucketEncryption.S3_MANAGED,
+            blockPublicAccess: {
+                blockPublicAcls: true,
+                blockPublicPolicy: true,
+                ignorePublicAcls: true,
+                restrictPublicBuckets: true,
+            },
+            cors: [
+                {
+                    allowedMethods: [
+                        s3.HttpMethods.GET,
+                        s3.HttpMethods.PUT,
+                        s3.HttpMethods.POST,
+                        s3.HttpMethods.DELETE,
+                    ],
+                    allowedOrigins: ['*'],
+                    allowedHeaders: ['*'],
+                    exposedHeaders: ['ETag'],
+                    maxAge: 3000,
+                }
+            ],
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+            autoDeleteObjects: true,
         });
 
         this.userPoolClient = new cognito.UserPoolClient(this, 'SmartAttendanceUserPoolClient', {
@@ -73,12 +110,63 @@ export class SmartAttendanceTrackerStack extends cdk.Stack {
                     cognito.OAuthScope.OPENID,
                     cognito.OAuthScope.PROFILE,
                 ],
-                callbackUrls: ['http://localhost:4173', 'http://localhost:4173/'],
+                callbackUrls: ['http://localhost:4173'],
             },
             preventUserExistenceErrors: true,
             refreshTokenValidity: cdk.Duration.days(30),
             accessTokenValidity: cdk.Duration.hours(1),
             idTokenValidity: cdk.Duration.hours(1),
+        });
+
+        // Create Cognito Identity Pool for S3 access
+        this.identityPool = new cognito.CfnIdentityPool(this, 'SmartAttendanceIdentityPool', {
+            identityPoolName: 'smart-attendance-identity-pool',
+            allowUnauthenticatedIdentities: false,
+            cognitoIdentityProviders: [
+                {
+                    clientId: this.userPoolClient.userPoolClientId,
+                    providerName: this.userPool.userPoolProviderName,
+                }
+            ],
+        });
+
+        // Create IAM role for authenticated users
+        const authenticatedRole = new iam.Role(this, 'CognitoAuthenticatedRole', {
+            assumedBy: new iam.FederatedPrincipal(
+                'cognito-identity.amazonaws.com',
+                {
+                    StringEquals: {
+                        'cognito-identity.amazonaws.com:aud': this.identityPool.ref,
+                    },
+                    'ForAnyValue:StringLike': {
+                        'cognito-identity.amazonaws.com:amr': 'authenticated',
+                    },
+                },
+                'sts:AssumeRoleWithWebIdentity'
+            ),
+        });
+
+        // Grant S3 access to authenticated users
+        authenticatedRole.addToPolicy(
+            new iam.PolicyStatement({
+                effect: iam.Effect.ALLOW,
+                actions: [
+                    's3:PutObject',
+                    's3:GetObject',
+                    's3:DeleteObject',
+                ],
+                resources: [
+                    `${this.studentImagesBucket.bucketArn}/face-registrations/\${cognito-identity.amazonaws.com:sub}/*`,
+                ],
+            })
+        );
+
+        // Attach the role to the identity pool
+        new cognito.CfnIdentityPoolRoleAttachment(this, 'IdentityPoolRoleAttachment', {
+            identityPoolId: this.identityPool.ref,
+            roles: {
+                authenticated: authenticatedRole.roleArn,
+            },
         });
 
         this.amplifyApp = new amplify.CfnApp(this, 'SmartAttendanceFrontend', {
@@ -97,6 +185,14 @@ export class SmartAttendanceTrackerStack extends cdk.Stack {
                     name: 'VITE_AWS_REGION',
                     value: this.region,
                 },
+                {
+                    name: 'VITE_AWS_S3_BUCKET',
+                    value: this.studentImagesBucket.bucketName,
+                },
+                {
+                    name: 'VITE_AWS_IDENTITY_POOL_ID',
+                    value: this.identityPool.ref,
+                }
             ],
             customRules: [
                 {
@@ -112,19 +208,6 @@ export class SmartAttendanceTrackerStack extends cdk.Stack {
             branchName: 'main',
             stage: 'PRODUCTION',
         });
-
-        this.studentImagesBucket = new s3.Bucket(this, 'StudentImagesBucket', {
-            versioned: false,
-            encryption: s3.BucketEncryption.S3_MANAGED,
-            blockPublicAccess: {
-                blockPublicAcls: true,
-                blockPublicPolicy: true,
-                ignorePublicAcls: true,
-                restrictPublicBuckets: true,
-            },
-            removalPolicy: cdk.RemovalPolicy.DESTROY,
-        });
-
 
         this.registerStudentFaceLambda = new lambda.Function(this, 'RegisterStudentFaceFunction', {
             runtime: lambda.Runtime.PYTHON_3_13,
@@ -192,6 +275,12 @@ export class SmartAttendanceTrackerStack extends cdk.Stack {
             value: this.registerStudentFaceLambda.functionName,
             description: 'Lambda Function Name for Register Student Face',
             exportName: 'SmartAttendanceRegisterStudentFaceLambdaName',
+        });
+
+        new cdk.CfnOutput(this, 'IdentityPoolId', {
+            value: this.identityPool.ref,
+            description: 'Cognito Identity Pool ID',
+            exportName: 'SmartAttendanceIdentityPoolId',
         });
     }
 }

@@ -1,6 +1,6 @@
 import type {FormEvent} from 'react';
 import {useState} from 'react';
-import {signIn} from 'aws-amplify/auth';
+import {signIn, getCurrentUser} from 'aws-amplify/auth';
 import {useNavigate} from 'react-router-dom';
 import type {CognitoError, LoginFormData, LoginFormErrors} from '../types/auth';
 import {validateEmail} from '../utils/validation';
@@ -65,6 +65,19 @@ export const useLoginForm = (): UseLoginFormReturn => {
         setErrors({});
 
         try {
+            // Check if user is already authenticated
+            try {
+                const currentUser = await getCurrentUser();
+                if (currentUser) {
+                    console.log('User already authenticated, redirecting to dashboard');
+                    await refreshUser();
+                    navigate('/dashboard');
+                    return;
+                }
+            } catch {
+                // No current user, proceed with login
+            }
+
             const {isSignedIn, nextStep} = await signIn({
                 username: formData.email,
                 password: formData.password,
@@ -126,6 +139,12 @@ export const useLoginForm = (): UseLoginFormReturn => {
             } else if (cognitoError.name === 'InvalidParameterException') {
                 errorMessage = 'Invalid email or password format.';
                 setErrors({general: errorMessage});
+            } else if (cognitoError.name === 'UserAlreadyAuthenticatedException') {
+                // User already has an active session, just refresh and redirect
+                console.log('User already authenticated, redirecting...');
+                await refreshUser();
+                navigate('/dashboard');
+                return;
             } else {
                 setErrors({general: cognitoError.message || errorMessage});
             }
