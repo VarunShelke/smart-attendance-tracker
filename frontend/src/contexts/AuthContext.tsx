@@ -32,6 +32,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({children}) => {
                 email: attributes.email || '',
                 firstName: attributes.given_name,
                 lastName: attributes.family_name,
+                faceRegistered: attributes['custom:faceRegistered'] === 'true',
             });
         } catch (error) {
             console.log('No authenticated user:', error);

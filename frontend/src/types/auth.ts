@@ -53,4 +53,18 @@ export interface User {
     firstName?: string;
     lastName?: string;
     userId: string;
+    faceRegistered?: boolean;
+}
+
+export interface FaceRegistrationState {
+    isCapturing: boolean;
+    isUploading: boolean;
+    capturedImage: string | null;
+    error: string | null;
+    success: boolean;
+}
+
+export interface CameraStream {
+    stream: MediaStream | null;
+    videoRef: HTMLVideoElement | null;
 }

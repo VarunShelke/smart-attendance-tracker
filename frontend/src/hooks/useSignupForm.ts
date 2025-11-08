@@ -96,7 +96,11 @@ export const useSignupForm = (): UseSignupFormReturn => {
             // Navigate to verification page if email confirmation is required
             if (nextStep.signUpStep === 'CONFIRM_SIGN_UP') {
                 navigate('/verify-email', {
-                    state: {email: formData.email},
+                    state: {
+                        email: formData.email,
+                        password: formData.password, // Pass password for auto-login after face registration
+                        userId: userId, // Pass userId for S3 filename
+                    },
                 });
             } else if (isSignUpComplete) {
                 // If sign up is complete without verification (unlikely with email verification enabled)

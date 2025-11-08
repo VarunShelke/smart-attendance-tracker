@@ -1,3 +1,0 @@
-test('SQS Queue Created', () => {
-
-});

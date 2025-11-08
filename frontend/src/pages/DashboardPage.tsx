@@ -110,6 +110,51 @@ const DashboardPage: React.FC = () => {
 
             {/* Main Content */}
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                {/* Face Registration Banner for users who skipped */}
+                {user?.faceRegistered === false && (
+                    <div className="mb-6 bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-lg">
+                        <div className="flex items-start">
+                            <div className="flex-shrink-0">
+                                <svg
+                                    className="h-6 w-6 text-yellow-400"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                                    />
+                                </svg>
+                            </div>
+                            <div className="ml-3 flex-1">
+                                <h3 className="text-sm font-medium text-yellow-800">
+                                    Complete Your Profile
+                                </h3>
+                                <p className="mt-1 text-sm text-yellow-700">
+                                    You haven't registered your face yet. Register now to enable attendance
+                                    tracking.
+                                </p>
+                                <div className="mt-3">
+                                    <Button
+                                        variant="secondary"
+                                        onClick={() => navigate('/face-registration', {
+                                            state: {
+                                                email: user.email,
+                                                userId: user.userId,
+                                            },
+                                        })}
+                                    >
+                                        Register Face Now
+                                    </Button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 <div className="bg-white rounded-lg shadow p-8">
                     <div className="text-center">
                         <div

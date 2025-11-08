@@ -2,6 +2,7 @@ import {BrowserRouter as Router, Navigate, Route, Routes} from 'react-router-dom
 import SignupPage from './pages/SignupPage';
 import LoginPage from './pages/LoginPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
+import FaceRegistrationPage from './pages/FaceRegistrationPage';
 import DashboardPage from './pages/DashboardPage';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import {AuthProvider} from './contexts/AuthContext';
@@ -16,6 +17,7 @@ function App() {
                     <Route path="/login" element={<LoginPage/>}/>
                     <Route path="/signup" element={<SignupPage/>}/>
                     <Route path="/verify-email" element={<VerifyEmailPage/>}/>
+                    <Route path="/face-registration" element={<FaceRegistrationPage/>}/>
                     <Route
                         path="/dashboard"
                         element={
