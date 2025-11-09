@@ -4,7 +4,7 @@ import Input from '../ui/Input';
 import Button from '../ui/Button';
 import Alert from '../ui/Alert';
 import {useLoginForm} from '../../hooks/useLoginForm';
-import {useAuth} from '../../contexts/AuthContext';
+import {useAuth} from '../../hooks/useAuth';
 
 const LoginForm: React.FC = () => {
     const location = useLocation();
@@ -23,7 +23,7 @@ const LoginForm: React.FC = () => {
     const [successMessage, setSuccessMessage] = useState('');
 
     useEffect(() => {
-        // Check if user was redirected from verification page
+        // Check if the user was redirected from the verification page
         if (location.state?.verificationSuccess) {
             setSuccessMessage('Your email has been verified successfully! You can now sign in.');
             setShowSuccessBanner(true);

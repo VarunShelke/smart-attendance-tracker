@@ -5,7 +5,7 @@ import VerifyEmailPage from './pages/VerifyEmailPage';
 import FaceRegistrationPage from './pages/FaceRegistrationPage';
 import DashboardPage from './pages/DashboardPage';
 import ProtectedRoute from './components/auth/ProtectedRoute';
-import {AuthProvider} from './contexts/AuthContext';
+import {AuthProvider} from './contexts/AuthProvider';
 import './config/amplify';
 
 function App() {

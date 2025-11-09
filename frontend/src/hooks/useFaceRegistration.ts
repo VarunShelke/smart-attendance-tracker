@@ -1,7 +1,7 @@
-import { useState, useRef, useCallback } from 'react';
-import { uploadData } from 'aws-amplify/storage';
-import { updateUserAttributes } from 'aws-amplify/auth';
-import type { FaceRegistrationState } from '../types/auth';
+import React, {useCallback, useRef, useState} from 'react';
+import {uploadData} from 'aws-amplify/storage';
+import {updateUserAttributes} from 'aws-amplify/auth';
+import type {FaceRegistrationState} from '../types/auth';
 
 interface UseFaceRegistrationReturn {
     state: FaceRegistrationState;
@@ -28,13 +28,13 @@ export const useFaceRegistration = (): UseFaceRegistrationReturn => {
 
     const startCamera = useCallback(async () => {
         try {
-            setState(prev => ({ ...prev, error: null, isCapturing: true }));
+            setState(prev => ({...prev, error: null, isCapturing: true}));
 
             // Request camera access with high quality for Amazon Rekognition
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: {
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 },
+                    width: {ideal: 1280},
+                    height: {ideal: 720},
                     facingMode: 'user', // Front camera (selfie mode)
                 },
                 audio: false,
@@ -46,7 +46,7 @@ export const useFaceRegistration = (): UseFaceRegistrationReturn => {
                 videoRef.current.srcObject = stream;
             }
 
-            setState(prev => ({ ...prev, isCapturing: false }));
+            setState(prev => ({...prev, isCapturing: false}));
         } catch (error) {
             console.error('Error accessing camera:', error);
             let errorMessage = 'Failed to access camera. Please ensure camera permissions are granted.';
@@ -82,7 +82,7 @@ export const useFaceRegistration = (): UseFaceRegistrationReturn => {
 
     const capturePhoto = useCallback(() => {
         if (!videoRef.current) {
-            setState(prev => ({ ...prev, error: 'Video element not ready' }));
+            setState(prev => ({...prev, error: 'Video element not ready'}));
             return;
         }
 
@@ -131,11 +131,11 @@ export const useFaceRegistration = (): UseFaceRegistrationReturn => {
 
     const uploadPhoto = useCallback(async (userId: string) => {
         if (!state.capturedImage) {
-            setState(prev => ({ ...prev, error: 'No photo captured' }));
+            setState(prev => ({...prev, error: 'No photo captured'}));
             return;
         }
 
-        setState(prev => ({ ...prev, isUploading: true, error: null }));
+        setState(prev => ({...prev, isUploading: true, error: null}));
 
         try {
             // Convert base64 to Blob

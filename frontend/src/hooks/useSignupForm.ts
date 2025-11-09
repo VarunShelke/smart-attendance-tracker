@@ -125,7 +125,7 @@ export const useSignupForm = (): UseSignupFormReturn => {
                         state: {email: formData.email},
                     });
                     return;
-                } catch (resendError) {
+                } catch {
                     // If resend fails, the user is already verified
                     errorMessage = 'An account with this email already exists. Please sign in.';
                     setErrors({email: errorMessage});
