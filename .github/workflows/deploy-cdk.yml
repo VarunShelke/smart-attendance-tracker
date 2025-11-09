@@ -1,0 +1,310 @@
+name: Deploy CDK Infrastructure
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'infrastructure/**'
+      - 'backend/src/lambda/**'
+      - '.github/workflows/deploy-cdk.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        options:
+          - production
+        default: 'production'
+
+# Prevent concurrent deployments to the same environment
+concurrency:
+  group: cdk-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  NODE_VERSION: '22'
+  PYTHON_VERSION: '3.13'
+
+# Explicitly set minimal permissions at the top level
+permissions:
+  id-token: write   # Required for OIDC authentication
+  contents: read    # Required to checkout code
+  pull-requests: write  # Required for PR comments (if needed)
+
+jobs:
+  validate:
+    name: Validate Infrastructure
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    outputs:
+      has-changes: ${{ steps.diff.outputs.has-changes }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Needed for proper diffing
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: infrastructure/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: backend/src/lambda/requirements.txt
+
+      - name: Install infrastructure dependencies
+        working-directory: infrastructure
+        run: |
+          npm ci --prefer-offline --no-audit
+          npm run build
+
+      - name: Install Lambda dependencies
+        working-directory: backend/src/lambda
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+
+      - name: Run CDK synth
+        working-directory: infrastructure
+        run: |
+          npx cdk synth --strict --version-reporting=false
+
+      - name: Check for infrastructure changes
+        id: diff
+        run: |
+          if git diff --quiet HEAD~1 HEAD -- infrastructure/ backend/src/lambda/ .github/workflows/deploy-cdk.yml; then
+            echo "has-changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "has-changes=true" >> $GITHUB_OUTPUT
+          fi
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: validate
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: infrastructure/package-lock.json
+
+      - name: Run npm audit
+        working-directory: infrastructure
+        run: |
+          npm audit --audit-level=moderate || true
+
+      - name: Check for secrets in code
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --only-verified
+
+  deploy:
+    name: Deploy to AWS
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [ validate, security-scan ]
+    if: needs.validate.outputs.has-changes == 'true' || github.event_name == 'workflow_dispatch'
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.amplify-url }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: infrastructure/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: GitHubActions-CDK-Deploy-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          # Security best practices
+          role-duration-seconds: 3600
+          mask-aws-account-id: true
+
+      - name: Verify AWS credentials
+        run: |
+          echo "Verifying AWS credentials..."
+          aws sts get-caller-identity
+          echo "AWS credentials verified successfully"
+
+      - name: Install infrastructure dependencies
+        working-directory: infrastructure
+        run: |
+          npm ci --prefer-offline --no-audit
+
+      - name: Install Lambda dependencies
+        working-directory: backend/src/lambda
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+
+      - name: Build CDK project
+        working-directory: infrastructure
+        run: |
+          npm run build
+
+      - name: CDK diff
+        id: diff
+        working-directory: infrastructure
+        run: |
+          npx cdk diff --strict 2>&1 | tee cdk-diff.txt || true
+        continue-on-error: true
+
+      - name: Upload diff artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cdk-diff
+          path: infrastructure/cdk-diff.txt
+          retention-days: 30
+
+      - name: CDK deploy
+        id: deploy
+        working-directory: infrastructure
+        run: |
+          echo "Starting CDK deployment..."
+
+          # Deploy with verbose output
+          npx cdk deploy \
+            --require-approval never \
+            --verbose \
+            --progress events \
+            --outputs-file cdk-outputs.json \
+            --ci true
+
+          echo "CDK deployment completed successfully"
+
+          # Extract Amplify URL if available
+          if [ -f cdk-outputs.json ]; then
+            AMPLIFY_DOMAIN=$(jq -r '.SmartAttendanceTrackerStack.AmplifyAppDefaultDomain // empty' cdk-outputs.json)
+            if [ -n "$AMPLIFY_DOMAIN" ]; then
+              echo "amplify-url=https://$AMPLIFY_DOMAIN" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Upload deployment outputs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cdk-outputs
+          path: infrastructure/cdk-outputs.json
+          retention-days: 90
+
+      - name: Verify deployment
+        working-directory: infrastructure
+        run: |
+          echo "Verifying deployed resources..."
+
+          # Get stack status
+          STACK_STATUS=$(aws cloudformation describe-stacks \
+            --stack-name SmartAttendanceTrackerStack \
+            --query 'Stacks[0].StackStatus' \
+            --output text \
+            --region ${{ env.AWS_REGION }})
+
+          echo "Stack status: $STACK_STATUS"
+
+          if [[ "$STACK_STATUS" != "CREATE_COMPLETE" && "$STACK_STATUS" != "UPDATE_COMPLETE" ]]; then
+            echo "Error: Stack deployment failed with status: $STACK_STATUS"
+            exit 1
+          fi
+
+          echo "Deployment verification completed successfully"
+
+      - name: Post-deployment validation
+        working-directory: infrastructure
+        run: |
+          echo "Running post-deployment validation..."
+
+          # Validate CloudFormation outputs
+          if [ -f cdk-outputs.json ]; then
+            echo "Validating CDK outputs..."
+
+            # Check for required outputs
+            REQUIRED_OUTPUTS=("UserPoolId" "UserPoolClientId" "AmplifyAppId" "StudentImagesBucketName")
+
+            for output in "${REQUIRED_OUTPUTS[@]}"; do
+              VALUE=$(jq -r ".SmartAttendanceTrackerStack.$output // empty" cdk-outputs.json)
+              if [ -z "$VALUE" ]; then
+                echo "Warning: Required output $output is missing"
+              else
+                echo "✓ $output: $VALUE"
+              fi
+            done
+          fi
+
+      - name: Cleanup on failure
+        if: failure()
+        working-directory: infrastructure
+        run: |
+          echo "Deployment failed. Checking stack events for errors..."
+
+          aws cloudformation describe-stack-events \
+            --stack-name SmartAttendanceTrackerStack \
+            --max-items 10 \
+            --query 'StackEvents[?ResourceStatus==`CREATE_FAILED` || ResourceStatus==`UPDATE_FAILED`].[LogicalResourceId,ResourceStatusReason]' \
+            --output table \
+            --region ${{ env.AWS_REGION }} || true
+
+  notify:
+    name: Notify Deployment Status
+    runs-on: ubuntu-latest
+    needs: [ deploy ]
+    if: always()
+
+    steps:
+      - name: Deployment Success
+        if: needs.deploy.result == 'success'
+        run: |
+          echo "✅ CDK deployment completed successfully"
+          echo "Deployment triggered by: ${{ github.actor }}"
+          echo "Commit: ${{ github.sha }}"
+
+      - name: Deployment Failure
+        if: needs.deploy.result == 'failure'
+        run: |
+          echo "❌ CDK deployment failed"
+          echo "Deployment triggered by: ${{ github.actor }}"
+          echo "Commit: ${{ github.sha }}"
+          exit 1
+
+      - name: Deployment Skipped
+        if: needs.deploy.result == 'skipped'
+        run: |
+          echo "⏭️ CDK deployment skipped (no infrastructure changes detected)"

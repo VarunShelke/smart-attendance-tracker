@@ -1,21 +1,28 @@
 import * as cdk from 'aws-cdk-lib';
+import {Stack, Tags} from 'aws-cdk-lib';
 import {Construct} from 'constructs';
 import * as cognito from "aws-cdk-lib/aws-cognito";
 import * as amplify from "aws-cdk-lib/aws-amplify";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as iam from "aws-cdk-lib/aws-iam";
+import * as logs from "aws-cdk-lib/aws-logs";
 
-export class SmartAttendanceTrackerStack extends cdk.Stack {
+export class SmartAttendanceTrackerStack extends Stack {
     public readonly userPool: cognito.UserPool;
     public readonly userPoolClient: cognito.UserPoolClient;
     public readonly identityPool: cognito.CfnIdentityPool;
     public readonly amplifyApp: amplify.CfnApp;
     public readonly studentImagesBucket: s3.Bucket;
     public readonly registerStudentFaceLambda: lambda.Function;
+    public readonly registerStudentFaceLambdaLogGroup: logs.LogGroup;
 
     constructor(scope: Construct, id: string, props?: cdk.StackProps) {
         super(scope, id, props);
+        Tags.of(this).add('Project', 'smart-attendance-tracker');
+        Tags.of(this).add('ManagedBy', 'cdk');
+        Tags.of(this).add('Owner', 'vps27');
+
         this.userPool = new cognito.UserPool(this, 'SmartAttendanceUserPool', {
             userPoolName: 'smart-attendance-user-pool',
             selfSignUpEnabled: true,
@@ -66,7 +73,7 @@ export class SmartAttendanceTrackerStack extends cdk.Stack {
             },
         });
 
-        // Create S3 bucket first (needed for IAM policies)
+        // Create an S3 bucket first (needed for IAM policies)
         this.studentImagesBucket = new s3.Bucket(this, 'StudentImagesBucket', {
             versioned: false,
             encryption: s3.BucketEncryption.S3_MANAGED,
@@ -130,7 +137,7 @@ export class SmartAttendanceTrackerStack extends cdk.Stack {
             ],
         });
 
-        // Create IAM role for authenticated users
+        // Create an IAM role for authenticated users
         const authenticatedRole = new iam.Role(this, 'CognitoAuthenticatedRole', {
             assumedBy: new iam.FederatedPrincipal(
                 'cognito-identity.amazonaws.com',
@@ -209,6 +216,12 @@ export class SmartAttendanceTrackerStack extends cdk.Stack {
             stage: 'PRODUCTION',
         });
 
+        this.registerStudentFaceLambdaLogGroup = new logs.LogGroup(this, 'RegisterStudentFaceLogGroup', {
+            logGroupName: '/aws/lambda/register-student-face',
+            retention: logs.RetentionDays.ONE_WEEK,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+        });
+
         this.registerStudentFaceLambda = new lambda.Function(this, 'RegisterStudentFaceFunction', {
             runtime: lambda.Runtime.PYTHON_3_13,
             architecture: lambda.Architecture.ARM_64,
@@ -217,6 +230,7 @@ export class SmartAttendanceTrackerStack extends cdk.Stack {
             functionName: 'register-student-face',
             timeout: cdk.Duration.seconds(29),
             memorySize: 256,
+            logGroup: this.registerStudentFaceLambdaLogGroup,
             environment: {
                 BUCKET_NAME: this.studentImagesBucket.bucketName,
             },
