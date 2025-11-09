@@ -1,0 +1,200 @@
+name: Validate Frontend Build
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'frontend/**'
+      - 'build-frontend.yml'
+  push:
+    branches-ignore:
+      - main
+    paths:
+      - 'frontend/**'
+      - 'build-frontend.yml'
+  workflow_dispatch:
+
+# Cancel in-progress runs for the same workflow and branch
+concurrency:
+  group: frontend-validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+
+permissions:
+  contents: read
+  pull-requests: write  # For posting comments on PRs
+
+jobs:
+  validate:
+    name: Build and Lint Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: |
+          npm ci --prefer-offline --no-audit
+
+      - name: Run ESLint
+        working-directory: frontend
+        run: |
+          npm run lint
+        continue-on-error: false
+
+      - name: Type check
+        working-directory: frontend
+        run: |
+          npx tsc --noEmit
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm run build
+        env:
+          # Provide dummy values for build-time environment variables
+          VITE_USER_POOL_ID: dummy-pool-id
+          VITE_USER_POOL_CLIENT_ID: dummy-client-id
+          VITE_AWS_REGION: us-east-1
+          VITE_AWS_S3_BUCKET: dummy-bucket
+          VITE_AWS_IDENTITY_POOL_ID: dummy-identity-pool
+
+      - name: Check build output
+        working-directory: frontend
+        run: |
+          echo "Checking build output..."
+          if [ ! -d "dist" ]; then
+            echo "Error: Build output directory 'dist' not found"
+            exit 1
+          fi
+
+          if [ ! -f "dist/index.html" ]; then
+            echo "Error: index.html not found in build output"
+            exit 1
+          fi
+
+          echo "✓ Build output validated successfully"
+
+          # Display build size
+          echo "Build size analysis:"
+          du -sh dist
+          echo ""
+          echo "Asset sizes:"
+          find dist -type f -name "*.js" -o -name "*.css" | xargs ls -lh | awk '{print $5, $9}'
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-build-${{ github.sha }}
+          path: frontend/dist
+          retention-days: 7
+
+  security:
+    name: Frontend Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Run npm audit
+        working-directory: frontend
+        run: |
+          # Run audit and allow moderate vulnerabilities (exit code 0 for moderate or lower)
+          npm audit --audit-level=high || {
+            EXIT_CODE=$?
+            if [ $EXIT_CODE -eq 1 ]; then
+              echo "❌ High or critical vulnerabilities found"
+              exit 1
+            else
+              echo "⚠️ Low or moderate vulnerabilities found (acceptable)"
+              exit 0
+            fi
+          }
+
+      - name: Check for outdated dependencies
+        working-directory: frontend
+        run: |
+          echo "Checking for outdated dependencies..."
+          npm outdated || true
+
+  report:
+    name: Report Results
+    runs-on: ubuntu-latest
+    needs: [ validate, security ]
+    if: always() && github.event_name == 'pull_request'
+
+    steps:
+      - name: Comment on PR - Success
+        if: needs.validate.result == 'success' && needs.security.result == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ **Frontend validation passed**\n\n- Build: ✅ Success\n- Linting: ✅ Passed\n- Type Check: ✅ Passed\n- Security: ✅ No critical issues'
+            })
+
+      - name: Comment on PR - Failure
+        if: needs.validate.result == 'failure' || needs.security.result == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const validateStatus = '${{ needs.validate.result }}' === 'success' ? '✅' : '❌';
+            const securityStatus = '${{ needs.security.result }}' === 'success' ? '✅' : '❌';
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `❌ **Frontend validation failed**\n\n- Build & Lint: ${validateStatus}\n- Security: ${securityStatus}\n\nPlease check the workflow logs for details.`
+            })
+
+  summary:
+    name: Validation Summary
+    runs-on: ubuntu-latest
+    needs: [ validate, security ]
+    if: always()
+
+    steps:
+      - name: Success Summary
+        if: needs.validate.result == 'success' && needs.security.result == 'success'
+        run: |
+          echo "✅ All frontend validation checks passed"
+          echo "- Build completed successfully"
+          echo "- Linting passed"
+          echo "- Type checking passed"
+          echo "- Security scan passed"
+
+      - name: Failure Summary
+        if: needs.validate.result == 'failure' || needs.security.result == 'failure'
+        run: |
+          echo "❌ Frontend validation failed"
+          echo "- Build & Lint: ${{ needs.validate.result }}"
+          echo "- Security: ${{ needs.security.result }}"
+          exit 1
