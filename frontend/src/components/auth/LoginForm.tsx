@@ -4,7 +4,7 @@ import Input from '../ui/Input';
 import Button from '../ui/Button';
 import Alert from '../ui/Alert';
 import {useLoginForm} from '../../hooks/useLoginForm';
-import {useAuth} from '../../contexts/AuthContext';
+import {useAuth} from '../../hooks/useAuth';
 
 const LoginForm: React.FC = () => {
     const location = useLocation();

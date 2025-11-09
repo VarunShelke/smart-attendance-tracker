@@ -1,7 +1,7 @@
 import React, {useEffect, useState} from 'react';
 import {useLocation, useNavigate} from 'react-router-dom';
 import {signIn} from 'aws-amplify/auth';
-import {useAuth} from '../contexts/AuthContext';
+import {useAuth} from '../hooks/useAuth';
 import FaceRegistration from '../components/camera/FaceRegistration';
 
 const FaceRegistrationPage: React.FC = () => {
@@ -32,10 +32,11 @@ const FaceRegistrationPage: React.FC = () => {
                         username: email,
                         password: password,
                     });
-                } catch (signInError: any) {
+                } catch (signInError: unknown) {
                     // If already signed in, just continue (this can happen if user has an active session)
-                    if (signInError.name === 'UserAlreadyAuthenticatedException' ||
-                        signInError.name === 'NotAuthorizedException' && signInError.message?.includes('already')) {
+                    const error = signInError as {name?: string; message?: string};
+                    if (error.name === 'UserAlreadyAuthenticatedException' ||
+                        error.name === 'NotAuthorizedException' && error.message?.includes('already')) {
                         console.log('User already authenticated, continuing...');
                     } else {
                         // For other errors, rethrow
@@ -72,10 +73,11 @@ const FaceRegistrationPage: React.FC = () => {
                         username: email,
                         password: password,
                     });
-                } catch (signInError: any) {
+                } catch (signInError: unknown) {
                     // If already signed in, just continue (this can happen if user has an active session)
-                    if (signInError.name === 'UserAlreadyAuthenticatedException' ||
-                        signInError.name === 'NotAuthorizedException' && signInError.message?.includes('already')) {
+                    const error = signInError as {name?: string; message?: string};
+                    if (error.name === 'UserAlreadyAuthenticatedException' ||
+                        error.name === 'NotAuthorizedException' && error.message?.includes('already')) {
                         console.log('User already authenticated, continuing...');
                     } else {
                         // For other errors, rethrow

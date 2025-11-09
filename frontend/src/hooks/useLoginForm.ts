@@ -4,7 +4,7 @@ import {getCurrentUser, signIn} from 'aws-amplify/auth';
 import {useNavigate} from 'react-router-dom';
 import type {CognitoError, LoginFormData, LoginFormErrors} from '../types/auth';
 import {validateEmail} from '../utils/validation';
-import {useAuth} from '../contexts/AuthContext';
+import {useAuth} from './useAuth';
 
 interface UseLoginFormReturn {
     formData: LoginFormData;
