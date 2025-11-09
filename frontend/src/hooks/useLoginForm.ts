@@ -1,6 +1,6 @@
 import type {FormEvent} from 'react';
 import {useState} from 'react';
-import {signIn, getCurrentUser} from 'aws-amplify/auth';
+import {getCurrentUser, signIn} from 'aws-amplify/auth';
 import {useNavigate} from 'react-router-dom';
 import type {CognitoError, LoginFormData, LoginFormErrors} from '../types/auth';
 import {validateEmail} from '../utils/validation';

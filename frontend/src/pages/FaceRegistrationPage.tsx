@@ -1,23 +1,23 @@
-import React, { useEffect, useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { signIn } from 'aws-amplify/auth';
-import { useAuth } from '../contexts/AuthContext';
+import React, {useEffect, useState} from 'react';
+import {useLocation, useNavigate} from 'react-router-dom';
+import {signIn} from 'aws-amplify/auth';
+import {useAuth} from '../contexts/AuthContext';
 import FaceRegistration from '../components/camera/FaceRegistration';
 
 const FaceRegistrationPage: React.FC = () => {
     const navigate = useNavigate();
     const location = useLocation();
-    const { refreshUser } = useAuth();
+    const {refreshUser} = useAuth();
     const [isAuthenticating, setIsAuthenticating] = useState(false);
 
     // Get email and password from navigation state (passed from verification page)
-    const { email, password, userId } = location.state || {};
+    const {email, password, userId} = location.state || {};
 
     useEffect(() => {
         // Redirect if required data is missing (email and userId are required, password is optional)
         if (!email || !userId) {
             console.error('Missing required authentication data');
-            navigate('/dashboard', { replace: true });
+            navigate('/dashboard', {replace: true});
         }
     }, [email, userId, navigate]);
 
@@ -48,13 +48,13 @@ const FaceRegistrationPage: React.FC = () => {
             await refreshUser();
 
             // Navigate to dashboard
-            navigate('/dashboard', { replace: true });
+            navigate('/dashboard', {replace: true});
         } catch (error) {
             console.error('Error during auto-login:', error);
             // If auto-login fails, redirect to login page with success message
             navigate('/login', {
                 replace: true,
-                state: { message: 'Face registered successfully! Please log in.' },
+                state: {message: 'Face registered successfully! Please log in.'},
             });
         } finally {
             setIsAuthenticating(false);
@@ -88,13 +88,13 @@ const FaceRegistrationPage: React.FC = () => {
             await refreshUser();
 
             // Navigate to dashboard
-            navigate('/dashboard', { replace: true });
+            navigate('/dashboard', {replace: true});
         } catch (error) {
             console.error('Error during auto-login:', error);
             // If auto-login fails, redirect to login page
             navigate('/login', {
                 replace: true,
-                state: { message: 'Account created successfully! Please log in.' },
+                state: {message: 'Account created successfully! Please log in.'},
             });
         } finally {
             setIsAuthenticating(false);
@@ -107,9 +107,11 @@ const FaceRegistrationPage: React.FC = () => {
 
     if (isAuthenticating) {
         return (
-            <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 flex items-center justify-center px-4">
+            <div
+                className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 flex items-center justify-center px-4">
                 <div className="text-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto mb-4"></div>
+                    <div
+                        className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto mb-4"></div>
                     <p className="text-gray-600">Logging you in...</p>
                 </div>
             </div>
@@ -117,13 +119,15 @@ const FaceRegistrationPage: React.FC = () => {
     }
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 flex items-center justify-center px-4 py-12">
+        <div
+            className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 flex items-center justify-center px-4 py-12">
             <div className="absolute inset-0 bg-grid-pattern opacity-5"></div>
             <div className="relative z-10 w-full max-w-2xl">
                 <div className="bg-white rounded-2xl shadow-xl p-8">
                     {/* Header */}
                     <div className="text-center mb-8">
-                        <div className="mx-auto w-16 h-16 bg-primary-100 rounded-full flex items-center justify-center mb-4">
+                        <div
+                            className="mx-auto w-16 h-16 bg-primary-100 rounded-full flex items-center justify-center mb-4">
                             <svg
                                 className="w-8 h-8 text-primary-600"
                                 fill="none"

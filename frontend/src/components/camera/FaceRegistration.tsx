@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { useFaceRegistration } from '../../hooks/useFaceRegistration';
+import React, {useEffect} from 'react';
+import {useFaceRegistration} from '../../hooks/useFaceRegistration';
 import Button from '../ui/Button';
 import Alert from '../ui/Alert';
 
@@ -9,7 +9,7 @@ interface FaceRegistrationProps {
     onSkip: () => void;
 }
 
-const FaceRegistration: React.FC<FaceRegistrationProps> = ({ userId, onSuccess, onSkip }) => {
+const FaceRegistration: React.FC<FaceRegistrationProps> = ({userId, onSuccess, onSkip}) => {
     const {
         state,
         videoRef,
@@ -42,7 +42,7 @@ const FaceRegistration: React.FC<FaceRegistrationProps> = ({ userId, onSuccess, 
         onSkip();
     };
 
-    // Show success state
+    // Show a success state
     if (state.success) {
         return (
             <div className="text-center">
@@ -78,7 +78,8 @@ const FaceRegistration: React.FC<FaceRegistrationProps> = ({ userId, onSuccess, 
                 <Alert
                     type="error"
                     message={state.error}
-                    onClose={() => {}}
+                    onClose={() => {
+                    }}
                 />
             )}
 
@@ -131,8 +132,10 @@ const FaceRegistration: React.FC<FaceRegistrationProps> = ({ userId, onSuccess, 
                         {/* Camera Guide Overlay */}
                         {videoRef.current?.srcObject && (
                             <div className="absolute inset-0 pointer-events-none">
-                                <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-64 h-64 border-4 border-white rounded-full opacity-30"></div>
-                                <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-60 text-white px-4 py-2 rounded-lg text-sm">
+                                <div
+                                    className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-64 h-64 border-4 border-white rounded-full opacity-30"></div>
+                                <div
+                                    className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-60 text-white px-4 py-2 rounded-lg text-sm">
                                     Position your face in the circle
                                 </div>
                             </div>

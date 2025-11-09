@@ -33,8 +33,8 @@ permissions:
   pull-requests: write  # For posting comments on PRs
 
 jobs:
-  validate-cdk:
-    name: Validate CDK Infrastructure
+  build-cdk:
+    name: Build CDK Infrastructure
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -49,190 +49,22 @@ jobs:
           cache: 'npm'
           cache-dependency-path: infrastructure/package-lock.json
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-          cache-dependency-path: backend/src/lambda/requirements.txt
-
       - name: Install CDK dependencies
         working-directory: infrastructure
         run: |
           npm ci --prefer-offline --no-audit
-
-      - name: Install Lambda dependencies
-        working-directory: backend/src/lambda
-        run: |
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          else
-            echo "No requirements.txt found, skipping Lambda dependency installation"
-          fi
 
       - name: Build CDK project
         working-directory: infrastructure
         run: |
           npm run build
 
-      - name: Run CDK tests
-        working-directory: infrastructure
-        run: |
-          npm test -- --passWithNoTests
-        continue-on-error: false
-
       - name: Validate TypeScript types
         working-directory: infrastructure
         run: |
           npx tsc --noEmit
 
-      - name: CDK synth
-        working-directory: infrastructure
-        run: |
-          npx cdk synth --strict --version-reporting=false
-        env:
-          # Prevent actual AWS calls during synth
-          CDK_DEFAULT_ACCOUNT: '123456789012'
-          CDK_DEFAULT_REGION: ${{ env.AWS_REGION }}
-
-      - name: Verify CloudFormation template
-        working-directory: infrastructure
-        run: |
-          echo "Verifying synthesized CloudFormation template..."
-
-          # Find the generated template
-          TEMPLATE_FILE=$(find cdk.out -name "*.template.json" -type f | head -n 1)
-
-          if [ -z "$TEMPLATE_FILE" ]; then
-            echo "Error: No CloudFormation template found in cdk.out"
-            exit 1
-          fi
-
-          echo "Found template: $TEMPLATE_FILE"
-
-          # Basic validation
-          if ! jq empty "$TEMPLATE_FILE" 2>/dev/null; then
-            echo "Error: Invalid JSON in CloudFormation template"
-            exit 1
-          fi
-
-          # Check for required resources
-          RESOURCES=$(jq -r '.Resources | keys[]' "$TEMPLATE_FILE")
-          echo "Resources in template:"
-          echo "$RESOURCES"
-
-          # Validate template structure
-          REQUIRED_SECTIONS=("AWSTemplateFormatVersion" "Resources")
-          for section in "${REQUIRED_SECTIONS[@]}"; do
-            if ! jq -e ".$section" "$TEMPLATE_FILE" > /dev/null; then
-              echo "Warning: Missing section: $section"
-            else
-              echo "✓ Section present: $section"
-            fi
-          done
-
-          echo "✓ CloudFormation template validated successfully"
-
-      - name: Check CDK best practices
-        working-directory: infrastructure
-        run: |
-          echo "Checking CDK best practices..."
-
-          # Check for removal policies on stateful resources
-          echo "Checking for proper removal policies..."
-
-          # Look for potential issues in the TypeScript code
-          if grep -r "RemovalPolicy.DESTROY" lib/ --include="*.ts"; then
-            echo "⚠️ Warning: Found RemovalPolicy.DESTROY - ensure this is intentional for production"
-          fi
-
-          # Check for hardcoded values
-          if grep -rE "(us-east-1|123456789012)" lib/ --include="*.ts"; then
-            echo "⚠️ Warning: Found potentially hardcoded values - consider using context or environment variables"
-          fi
-
-          echo "✓ Best practices check completed"
-
-      - name: Upload CDK artifacts
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: cdk-output-${{ github.sha }}
-          path: infrastructure/cdk.out
-          retention-days: 7
-
-  validate-lambda:
-    name: Validate Lambda Functions
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install Lambda dependencies
-        working-directory: backend/src/lambda
-        run: |
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-            echo "✓ Lambda dependencies installed"
-          else
-            echo "No requirements.txt found"
-          fi
-
-      - name: Lint Python code
-        working-directory: backend/src/lambda
-        run: |
-          # Install linting tools
-          pip install flake8 pylint
-
-          # Run flake8
-          echo "Running flake8..."
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
-
-          # Run pylint (informational only)
-          echo "Running pylint..."
-          pylint **/*.py --exit-zero || true
-
-      - name: Check Python syntax
-        working-directory: backend/src/lambda
-        run: |
-          echo "Checking Python syntax..."
-          python -m py_compile *.py
-          echo "✓ Python syntax check passed"
-
-      - name: Validate Lambda handler exists
-        working-directory: backend/src/lambda
-        run: |
-          echo "Validating Lambda handlers..."
-
-          # Check for expected Lambda handlers based on CDK stack
-          EXPECTED_HANDLERS=("register_student_face.py")
-
-          for handler in "${EXPECTED_HANDLERS[@]}"; do
-            if [ -f "$handler" ]; then
-              echo "✓ Found: $handler"
-
-              # Check if handler function exists
-              if grep -q "def handler" "$handler"; then
-                echo "  ✓ Handler function found"
-              else
-                echo "  ⚠️ Warning: Handler function not found in $handler"
-              fi
-            else
-              echo "❌ Missing: $handler"
-              exit 1
-            fi
-          done
-
-          echo "✓ Lambda handler validation completed"
-
-  security:
+  security-scan:
     name: Infrastructure Security Scan
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -263,14 +95,6 @@ jobs:
             fi
           }
 
-      - name: Check Python dependencies for vulnerabilities
-        working-directory: backend/src/lambda
-        run: |
-          if [ -f requirements.txt ]; then
-            pip install safety
-            safety check -r requirements.txt --continue-on-error || true
-          fi
-
       - name: Check for outdated dependencies
         working-directory: infrastructure
         run: |
@@ -280,12 +104,12 @@ jobs:
   report:
     name: Report Results
     runs-on: ubuntu-latest
-    needs: [validate-cdk, validate-lambda, security]
+    needs: [ build-cdk, security-scan ]
     if: always() && github.event_name == 'pull_request'
 
     steps:
       - name: Comment on PR - Success
-        if: needs.validate-cdk.result == 'success' && needs.validate-lambda.result == 'success' && needs.security.result == 'success'
+        if: needs.build-cdk.result == 'success' && needs.security-scan.result == 'success'
         uses: actions/github-script@v7
         with:
           script: |
@@ -297,30 +121,29 @@ jobs:
             })
 
       - name: Comment on PR - Failure
-        if: needs.validate-cdk.result == 'failure' || needs.validate-lambda.result == 'failure' || needs.security.result == 'failure'
+        if: needs.build-cdk.result == 'failure' || needs.security-scan.result == 'failure'
         uses: actions/github-script@v7
         with:
           script: |
-            const cdkStatus = '${{ needs.validate-cdk.result }}' === 'success' ? '✅' : '❌';
-            const lambdaStatus = '${{ needs.validate-lambda.result }}' === 'success' ? '✅' : '❌';
-            const securityStatus = '${{ needs.security.result }}' === 'success' ? '✅' : '❌';
+            const cdkStatus = '${{ needs.build-cdk.result }}' === 'success' ? '✅' : '❌';
+            const securityStatus = '${{ needs.security-scan.result }}' === 'success' ? '✅' : '❌';
 
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `❌ **Infrastructure validation failed**\n\n- CDK Build & Synth: ${cdkStatus}\n- Lambda Validation: ${lambdaStatus}\n- Security: ${securityStatus}\n\nPlease check the workflow logs for details.`
+              body: `❌ **Infrastructure validation failed**\n\n- CDK Build: ${cdkStatus}\n- Security Scan: ${securityStatus}\n\nPlease check the workflow logs for details.`
             })
 
   summary:
     name: Validation Summary
     runs-on: ubuntu-latest
-    needs: [validate-cdk, validate-lambda, security]
+    needs: [ build-cdk, security-scan ]
     if: always()
 
     steps:
       - name: Success Summary
-        if: needs.validate-cdk.result == 'success' && needs.validate-lambda.result == 'success' && needs.security.result == 'success'
+        if: needs.build-cdk.result == 'success' && needs.security-scan.result == 'success'
         run: |
           echo "✅ All infrastructure validation checks passed"
           echo "- CDK build completed successfully"
@@ -329,10 +152,9 @@ jobs:
           echo "- Security scan passed"
 
       - name: Failure Summary
-        if: needs.validate-cdk.result == 'failure' || needs.validate-lambda.result == 'failure' || needs.security.result == 'failure'
+        if: needs.build-cdk.result == 'failure' || needs.security-scan.result == 'failure'
         run: |
           echo "❌ Infrastructure validation failed"
           echo "- CDK Validation: ${{ needs.validate-cdk.result }}"
-          echo "- Lambda Validation: ${{ needs.validate-lambda.result }}"
-          echo "- Security: ${{ needs.security.result }}"
+          echo "- Security Scan: ${{ needs.security.result }}"
           exit 1

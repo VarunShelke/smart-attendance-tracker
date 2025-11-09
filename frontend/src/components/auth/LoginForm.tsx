@@ -23,7 +23,7 @@ const LoginForm: React.FC = () => {
     const [successMessage, setSuccessMessage] = useState('');
 
     useEffect(() => {
-        // Check if user was redirected from verification page
+        // Check if the user was redirected from the verification page
         if (location.state?.verificationSuccess) {
             setSuccessMessage('Your email has been verified successfully! You can now sign in.');
             setShowSuccessBanner(true);
