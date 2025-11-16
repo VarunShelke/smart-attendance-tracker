@@ -5,17 +5,21 @@ import * as cognito from "aws-cdk-lib/aws-cognito";
 import * as amplify from "aws-cdk-lib/aws-amplify";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as lambda from "aws-cdk-lib/aws-lambda";
-import * as iam from "aws-cdk-lib/aws-iam";
 import * as logs from "aws-cdk-lib/aws-logs";
+import * as apigatewayv2 from 'aws-cdk-lib/aws-apigatewayv2';
+import * as apigatewayv2_integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import * as apigatewayv2_authorizers from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+
 
 export class SmartAttendanceTrackerStack extends Stack {
     public readonly userPool: cognito.UserPool;
     public readonly userPoolClient: cognito.UserPoolClient;
-    public readonly identityPool: cognito.CfnIdentityPool;
     public readonly amplifyApp: amplify.CfnApp;
     public readonly studentImagesBucket: s3.Bucket;
     public readonly registerStudentFaceLambda: lambda.Function;
     public readonly registerStudentFaceLambdaLogGroup: logs.LogGroup;
+    public readonly api: apigatewayv2.HttpApi;
+    public readonly apiLogGroup: logs.LogGroup;
 
     constructor(scope: Construct, id: string, props?: cdk.StackProps) {
         super(scope, id, props);
@@ -73,7 +77,7 @@ export class SmartAttendanceTrackerStack extends Stack {
             },
         });
 
-        // Create an S3 bucket first (needed for IAM policies)
+        // Create an S3 bucket for storing face registration images
         this.studentImagesBucket = new s3.Bucket(this, 'StudentImagesBucket', {
             versioned: false,
             encryption: s3.BucketEncryption.S3_MANAGED,
@@ -83,20 +87,6 @@ export class SmartAttendanceTrackerStack extends Stack {
                 ignorePublicAcls: true,
                 restrictPublicBuckets: true,
             },
-            cors: [
-                {
-                    allowedMethods: [
-                        s3.HttpMethods.GET,
-                        s3.HttpMethods.PUT,
-                        s3.HttpMethods.POST,
-                        s3.HttpMethods.DELETE,
-                    ],
-                    allowedOrigins: ['*'],
-                    allowedHeaders: ['*'],
-                    exposedHeaders: ['ETag'],
-                    maxAge: 3000,
-                }
-            ],
             removalPolicy: cdk.RemovalPolicy.DESTROY,
             autoDeleteObjects: true,
         });
@@ -125,54 +115,25 @@ export class SmartAttendanceTrackerStack extends Stack {
             idTokenValidity: cdk.Duration.hours(1),
         });
 
-        // Create Cognito Identity Pool for S3 access
-        this.identityPool = new cognito.CfnIdentityPool(this, 'SmartAttendanceIdentityPool', {
-            identityPoolName: 'smart-attendance-identity-pool',
-            allowUnauthenticatedIdentities: false,
-            cognitoIdentityProviders: [
-                {
-                    clientId: this.userPoolClient.userPoolClientId,
-                    providerName: this.userPool.userPoolProviderName,
-                }
-            ],
+        // CloudWatch Log Group for API Gateway access logs
+        this.apiLogGroup = new logs.LogGroup(this, 'ApiGatewayAccessLogs', {
+            logGroupName: '/aws/apigateway/smart-attendance',
+            retention: logs.RetentionDays.ONE_WEEK,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
         });
 
-        // Create an IAM role for authenticated users
-        const authenticatedRole = new iam.Role(this, 'CognitoAuthenticatedRole', {
-            assumedBy: new iam.FederatedPrincipal(
-                'cognito-identity.amazonaws.com',
-                {
-                    StringEquals: {
-                        'cognito-identity.amazonaws.com:aud': this.identityPool.ref,
-                    },
-                    'ForAnyValue:StringLike': {
-                        'cognito-identity.amazonaws.com:amr': 'authenticated',
-                    },
-                },
-                'sts:AssumeRoleWithWebIdentity'
-            ),
-        });
-
-        // Grant S3 access to authenticated users
-        authenticatedRole.addToPolicy(
-            new iam.PolicyStatement({
-                effect: iam.Effect.ALLOW,
-                actions: [
-                    's3:PutObject',
-                    's3:GetObject',
-                    's3:DeleteObject',
+        // Create HTTP API Gateway
+        this.api = new apigatewayv2.HttpApi(this, 'FaceRegistrationApi', {
+            apiName: 'smart-attendance-api',
+            description: 'API for face registration and attendance tracking',
+            corsPreflight: {
+                allowOrigins: [
+                    'http://localhost:5173',
                 ],
-                resources: [
-                    `${this.studentImagesBucket.bucketArn}/face-registrations/\${cognito-identity.amazonaws.com:sub}/*`,
-                ],
-            })
-        );
-
-        // Attach the role to the identity pool
-        new cognito.CfnIdentityPoolRoleAttachment(this, 'IdentityPoolRoleAttachment', {
-            identityPoolId: this.identityPool.ref,
-            roles: {
-                authenticated: authenticatedRole.roleArn,
+                allowMethods: [apigatewayv2.CorsHttpMethod.POST, apigatewayv2.CorsHttpMethod.OPTIONS],
+                allowHeaders: ['Content-Type', 'Authorization'],
+                allowCredentials: true,
+                maxAge: cdk.Duration.hours(1),
             },
         });
 
@@ -181,11 +142,11 @@ export class SmartAttendanceTrackerStack extends Stack {
             platform: 'WEB_COMPUTE',
             environmentVariables: [
                 {
-                    name: 'VITE_USER_POOL_ID',
+                    name: 'VITE_AWS_USER_POOL_ID',
                     value: this.userPool.userPoolId,
                 },
                 {
-                    name: 'VITE_USER_POOL_CLIENT_ID',
+                    name: 'VITE_AWS_USER_POOL_CLIENT_ID',
                     value: this.userPoolClient.userPoolClientId,
                 },
                 {
@@ -193,12 +154,8 @@ export class SmartAttendanceTrackerStack extends Stack {
                     value: this.region,
                 },
                 {
-                    name: 'VITE_AWS_S3_BUCKET',
-                    value: this.studentImagesBucket.bucketName,
-                },
-                {
-                    name: 'VITE_AWS_IDENTITY_POOL_ID',
-                    value: this.identityPool.ref,
+                    name: 'VITE_API_ENDPOINT',
+                    value: this.api.apiEndpoint,
                 }
             ],
             customRules: [
@@ -229,14 +186,48 @@ export class SmartAttendanceTrackerStack extends Stack {
             code: lambda.Code.fromAsset('../backend/src/lambda'),
             functionName: 'register-student-face',
             timeout: cdk.Duration.seconds(29),
-            memorySize: 256,
+            memorySize: 512,
             logGroup: this.registerStudentFaceLambdaLogGroup,
             environment: {
-                BUCKET_NAME: this.studentImagesBucket.bucketName,
+                S3_BUCKET_NAME: this.studentImagesBucket.bucketName,
+                USER_POOL_ID: this.userPool.userPoolId,
+                API_VERSION: 'v1',
             },
         });
 
-        this.studentImagesBucket.grantReadWrite(this.registerStudentFaceLambda);
+        // Grant Lambda permissions to write to S3
+        this.studentImagesBucket.grantWrite(this.registerStudentFaceLambda, 'face_registrations/*');
+
+        // Create Cognito User Pool Authorizer
+        const authorizer = new apigatewayv2_authorizers.HttpUserPoolAuthorizer(
+            'CognitoAuthorizer',
+            this.userPool,
+            {
+                userPoolClients: [this.userPoolClient],
+                identitySource: ['$request.header.Authorization'],
+            }
+        );
+
+        const registerFaceIntegration = new apigatewayv2_integrations.HttpLambdaIntegration(
+            'RegisterFaceIntegration',
+            this.registerStudentFaceLambda
+        );
+
+        this.api.addRoutes({
+            path: '/api/v1/students/me/face',
+            methods: [apigatewayv2.HttpMethod.POST],
+            integration: registerFaceIntegration,
+            authorizer: authorizer,
+        });
+
+        // Add throttling to default stage
+        const defaultStage = this.api.defaultStage?.node.defaultChild as apigatewayv2.CfnStage;
+        if (defaultStage) {
+            defaultStage.defaultRouteSettings = {
+                throttlingBurstLimit: 10,
+                throttlingRateLimit: 1,
+            };
+        }
 
         new cdk.CfnOutput(this, 'UserPoolId', {
             value: this.userPool.userPoolId,
@@ -291,10 +282,16 @@ export class SmartAttendanceTrackerStack extends Stack {
             exportName: 'SmartAttendanceRegisterStudentFaceLambdaName',
         });
 
-        new cdk.CfnOutput(this, 'IdentityPoolId', {
-            value: this.identityPool.ref,
-            description: 'Cognito Identity Pool ID',
-            exportName: 'SmartAttendanceIdentityPoolId',
+        new cdk.CfnOutput(this, 'ApiEndpoint', {
+            value: this.api.apiEndpoint,
+            description: 'API Gateway endpoint URL',
+            exportName: 'SmartAttendanceApiEndpoint',
+        });
+
+        new cdk.CfnOutput(this, 'ApiId', {
+            value: this.api.httpApiId,
+            description: 'API Gateway ID',
+            exportName: 'SmartAttendanceApiId',
         });
     }
 }

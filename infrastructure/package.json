@@ -5,8 +5,7 @@
     "smart-attendanc-tracker-infra": "dist/bin/app.js"
   },
   "scripts": {
-    "build": " npm run clean && tsc",
-    "clean": "rm -rf dist",
+    "build": "tsc",
     "watch": "tsc -w",
     "test": "jest",
     "cdk": "cdk",

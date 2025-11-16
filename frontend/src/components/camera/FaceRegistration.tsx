@@ -4,12 +4,10 @@ import Button from '../ui/Button';
 import Alert from '../ui/Alert';
 
 interface FaceRegistrationProps {
-    userId: string;
     onSuccess: () => void;
-    onSkip: () => void;
 }
 
-const FaceRegistration: React.FC<FaceRegistrationProps> = ({userId, onSuccess, onSkip}) => {
+const FaceRegistration: React.FC<FaceRegistrationProps> = ({onSuccess}) => {
     const {
         state,
         videoRef,
@@ -17,8 +15,7 @@ const FaceRegistration: React.FC<FaceRegistrationProps> = ({userId, onSuccess, o
         stopCamera,
         capturePhoto,
         retakePhoto,
-        uploadPhoto,
-        skipRegistration,
+        registerFace,
     } = useFaceRegistration();
 
     // Cleanup camera on unmount
@@ -28,18 +25,13 @@ const FaceRegistration: React.FC<FaceRegistrationProps> = ({userId, onSuccess, o
         };
     }, [stopCamera]);
 
-    const handleUpload = async () => {
-        await uploadPhoto(userId);
+    const handleRegister = async () => {
+        await registerFace();
         if (!state.error) {
             setTimeout(() => {
                 onSuccess();
             }, 1500);
         }
-    };
-
-    const handleSkip = async () => {
-        await skipRegistration();
-        onSkip();
     };
 
     // Show a success state
@@ -154,26 +146,17 @@ const FaceRegistration: React.FC<FaceRegistrationProps> = ({userId, onSuccess, o
             {/* Action Buttons */}
             <div className="space-y-3">
                 {!state.capturedImage ? (
-                    // Capture and Skip Buttons
-                    <>
-                        <Button
-                            variant="primary"
-                            fullWidth
-                            onClick={capturePhoto}
-                            disabled={!videoRef.current?.srcObject || state.isCapturing}
-                        >
-                            Capture Photo
-                        </Button>
-                        <Button
-                            variant="outline"
-                            fullWidth
-                            onClick={handleSkip}
-                        >
-                            Skip for Now
-                        </Button>
-                    </>
+                    // Capture Button
+                    <Button
+                        variant="primary"
+                        fullWidth
+                        onClick={capturePhoto}
+                        disabled={!videoRef.current?.srcObject || state.isCapturing}
+                    >
+                        Capture Photo
+                    </Button>
                 ) : (
-                    // Upload and Retake Buttons
+                    // Register and Retake Buttons
                     <div className="grid grid-cols-2 gap-3">
                         <Button
                             variant="secondary"
@@ -184,10 +167,10 @@ const FaceRegistration: React.FC<FaceRegistrationProps> = ({userId, onSuccess, o
                         </Button>
                         <Button
                             variant="primary"
-                            onClick={handleUpload}
+                            onClick={handleRegister}
                             isLoading={state.isUploading}
                         >
-                            {state.isUploading ? 'Uploading...' : 'Upload & Continue'}
+                            {state.isUploading ? 'Registering...' : 'Register Face'}
                         </Button>
                     </div>
                 )}
