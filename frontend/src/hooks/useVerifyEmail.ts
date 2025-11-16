@@ -1,6 +1,6 @@
 import type {FormEvent} from 'react';
 import {useEffect, useState} from 'react';
-import {confirmSignUp, resendSignUpCode} from 'aws-amplify/auth';
+import {confirmSignUp, resendSignUpCode, signIn, signOut} from 'aws-amplify/auth';
 import type {CognitoError, VerifyEmailFormData, VerifyEmailFormErrors} from '../types/auth';
 
 interface UseVerifyEmailReturn {
@@ -19,7 +19,7 @@ interface UseVerifyEmailReturn {
 
 const RESEND_COOLDOWN = 60; // 60 seconds
 
-export const useVerifyEmail = (email: string): UseVerifyEmailReturn => {
+export const useVerifyEmail = (email: string, password?: string): UseVerifyEmailReturn => {
     const [formData, setFormData] = useState<VerifyEmailFormData>({
         email,
         code: '',
@@ -81,15 +81,44 @@ export const useVerifyEmail = (email: string): UseVerifyEmailReturn => {
         setErrors({});
 
         try {
+            // Confirm the email with the verification code
             await confirmSignUp({
                 username: formData.email,
                 confirmationCode: formData.code,
             });
 
             console.log('Email verification successful');
+
+            // After confirmSignUp, Cognito may auto-authenticate the user with an incomplete session.
+            // We need to sign out first, then sign in properly to establish a complete session.
+            if (password) {
+                try {
+                    // First, sign out any auto-authenticated session to clear incomplete state
+                    try {
+                        await signOut();
+                        console.log('Signed out auto-authenticated session');
+                    } catch (signOutError) {
+                        // If sign out fails, the user wasn't signed in - that's fine
+                        console.log('No auto-authenticated session to sign out');
+                    }
+
+                    // Now sign in properly to establish a complete session with valid tokens
+                    await signIn({
+                        username: formData.email,
+                        password: password,
+                    });
+                    console.log('Sign-in successful with complete session after email verification');
+                } catch (signInError) {
+                    console.error('Sign-in failed after email verification:', signInError);
+                    throw signInError;
+                }
+            } else {
+                console.warn('No password provided - user will need to sign in manually');
+            }
+
             setIsSuccess(true);
 
-            // Success handling will be done in the component (redirect to login)
+            // Success handling will be done in the component (redirect to face registration)
         } catch (error) {
             const cognitoError = error as CognitoError;
             console.error('Verification error:', cognitoError);

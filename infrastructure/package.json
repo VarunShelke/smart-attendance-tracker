@@ -1,8 +1,8 @@
 {
-  "name": "smart-attendanc-tracker-infra",
+  "name": "smart-attendance-tracker-infra",
   "version": "1.0.0",
   "bin": {
-    "smart-attendanc-tracker-infra": "dist/bin/app.js"
+    "smart-attendance-tracker-infra": "dist/bin/app.js"
   },
   "scripts": {
     "build": "tsc",

@@ -6,9 +6,7 @@ import * as amplify from "aws-cdk-lib/aws-amplify";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as logs from "aws-cdk-lib/aws-logs";
-import * as apigatewayv2 from 'aws-cdk-lib/aws-apigatewayv2';
-import * as apigatewayv2_integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
-import * as apigatewayv2_authorizers from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 
 
 export class SmartAttendanceTrackerStack extends Stack {
@@ -18,8 +16,10 @@ export class SmartAttendanceTrackerStack extends Stack {
     public readonly studentImagesBucket: s3.Bucket;
     public readonly registerStudentFaceLambda: lambda.Function;
     public readonly registerStudentFaceLambdaLogGroup: logs.LogGroup;
-    public readonly api: apigatewayv2.HttpApi;
+    public readonly api: apigateway.RestApi;
     public readonly apiLogGroup: logs.LogGroup;
+    public readonly usagePlan: apigateway.UsagePlan;
+    public readonly apiKey: apigateway.ApiKey;
 
     constructor(scope: Construct, id: string, props?: cdk.StackProps) {
         super(scope, id, props);
@@ -107,7 +107,7 @@ export class SmartAttendanceTrackerStack extends Stack {
                     cognito.OAuthScope.OPENID,
                     cognito.OAuthScope.PROFILE,
                 ],
-                callbackUrls: ['http://localhost:4173'],
+                callbackUrls: ['http://localhost:4173', 'http://localhost:5173'],
             },
             preventUserExistenceErrors: true,
             refreshTokenValidity: cdk.Duration.days(30),
@@ -122,19 +122,38 @@ export class SmartAttendanceTrackerStack extends Stack {
             removalPolicy: cdk.RemovalPolicy.DESTROY,
         });
 
-        // Create HTTP API Gateway
-        this.api = new apigatewayv2.HttpApi(this, 'FaceRegistrationApi', {
-            apiName: 'smart-attendance-api',
+        // Create REST API Gateway
+        this.api = new apigateway.RestApi(this, 'SmartAttendanceAPI', {
+            restApiName: 'smart-attendance-api',
             description: 'API for face registration and attendance tracking',
-            corsPreflight: {
+            deployOptions: {
+                stageName: 'api',
+                loggingLevel: apigateway.MethodLoggingLevel.INFO,
+                dataTraceEnabled: true,
+                accessLogDestination: new apigateway.LogGroupLogDestination(this.apiLogGroup),
+                accessLogFormat: apigateway.AccessLogFormat.jsonWithStandardFields({
+                    caller: true,
+                    httpMethod: true,
+                    ip: true,
+                    protocol: true,
+                    requestTime: true,
+                    resourcePath: true,
+                    responseLength: true,
+                    status: true,
+                    user: true,
+                }),
+            },
+            defaultCorsPreflightOptions: {
                 allowOrigins: [
-                    'http://localhost:5173',
+                    'http://localhost:5173', 'http://localhost:4173'
                 ],
-                allowMethods: [apigatewayv2.CorsHttpMethod.POST, apigatewayv2.CorsHttpMethod.OPTIONS],
-                allowHeaders: ['Content-Type', 'Authorization'],
+                allowMethods: apigateway.Cors.ALL_METHODS,
+                allowHeaders: ['Content-Type', 'Authorization', 'X-Api-Key'],
                 allowCredentials: true,
                 maxAge: cdk.Duration.hours(1),
             },
+            cloudWatchRole: true,
+            apiKeySourceType: apigateway.ApiKeySourceType.HEADER,
         });
 
         this.amplifyApp = new amplify.CfnApp(this, 'SmartAttendanceFrontend', {
@@ -155,7 +174,7 @@ export class SmartAttendanceTrackerStack extends Stack {
                 },
                 {
                     name: 'VITE_API_ENDPOINT',
-                    value: this.api.apiEndpoint,
+                    value: this.api.url,
                 }
             ],
             customRules: [
@@ -183,7 +202,7 @@ export class SmartAttendanceTrackerStack extends Stack {
             runtime: lambda.Runtime.PYTHON_3_13,
             architecture: lambda.Architecture.ARM_64,
             handler: 'register_student_face.handler',
-            code: lambda.Code.fromAsset('../backend/src/lambda'),
+            code: lambda.Code.fromAsset('../backend/src/lambda/student'),
             functionName: 'register-student-face',
             timeout: cdk.Duration.seconds(29),
             memorySize: 512,
@@ -198,36 +217,67 @@ export class SmartAttendanceTrackerStack extends Stack {
         // Grant Lambda permissions to write to S3
         this.studentImagesBucket.grantWrite(this.registerStudentFaceLambda, 'face_registrations/*');
 
-        // Create Cognito User Pool Authorizer
-        const authorizer = new apigatewayv2_authorizers.HttpUserPoolAuthorizer(
-            'CognitoAuthorizer',
-            this.userPool,
-            {
-                userPoolClients: [this.userPoolClient],
-                identitySource: ['$request.header.Authorization'],
-            }
-        );
-
-        const registerFaceIntegration = new apigatewayv2_integrations.HttpLambdaIntegration(
-            'RegisterFaceIntegration',
-            this.registerStudentFaceLambda
-        );
-
-        this.api.addRoutes({
-            path: '/api/v1/students/me/face',
-            methods: [apigatewayv2.HttpMethod.POST],
-            integration: registerFaceIntegration,
-            authorizer: authorizer,
+        // Create Cognito User Pool Authorizer for REST API
+        const authorizer = new apigateway.CognitoUserPoolsAuthorizer(this, 'CognitoAuthorizer', {
+            cognitoUserPools: [this.userPool],
+            authorizerName: 'CognitoAuthorizer',
+            identitySource: 'method.request.header.Authorization',
         });
 
-        // Add throttling to default stage
-        const defaultStage = this.api.defaultStage?.node.defaultChild as apigatewayv2.CfnStage;
-        if (defaultStage) {
-            defaultStage.defaultRouteSettings = {
-                throttlingBurstLimit: 10,
-                throttlingRateLimit: 1,
-            };
-        }
+        // Create Lambda integration for REST API
+        const registerFaceIntegration = new apigateway.LambdaIntegration(this.registerStudentFaceLambda, {
+            proxy: true,
+            allowTestInvoke: true,
+        });
+
+        // Define CORS configuration for face registration endpoint
+        const corsOptions: apigateway.CorsOptions = {
+            allowOrigins: ['http://localhost:5173', 'http://localhost:4173'],
+            allowMethods: ['POST', 'OPTIONS'],
+            allowHeaders: ['Content-Type', 'Authorization', 'X-Api-Key'],
+            allowCredentials: true,
+            maxAge: cdk.Duration.hours(1),
+        };
+
+        const v1Resource = this.api.root.addResource('v1');
+        const studentsResource = v1Resource.addResource('students');
+        const meResource = studentsResource.addResource('me');
+        const faceResource = meResource.addResource('face', {
+            defaultCorsPreflightOptions: corsOptions,
+        });
+
+        // Add POST method with authorization and API key requirement
+        faceResource.addMethod('POST', registerFaceIntegration, {
+            authorizer: authorizer,
+            authorizationType: apigateway.AuthorizationType.COGNITO,
+            apiKeyRequired: true,
+        });
+
+        // Create API Key for rate limiting
+        this.apiKey = new apigateway.ApiKey(this, 'SmartAttendanceApiKey', {
+            apiKeyName: 'smart-attendance-api-key',
+            description: 'API Key for smart attendance tracker',
+            enabled: true,
+        });
+
+        // Create Usage Plan with rate limiting (1 req/sec, burst 10)
+        this.usagePlan = new apigateway.UsagePlan(this, 'SmartAttendanceUsagePlan', {
+            name: 'smart-attendance-usage-plan',
+            description: 'Usage plan with 1 req/sec rate limit',
+            throttle: {
+                rateLimit: 100,
+                burstLimit: 1000,
+            },
+            apiStages: [
+                {
+                    api: this.api,
+                    stage: this.api.deploymentStage,
+                },
+            ],
+        });
+
+        // Associate API Key with Usage Plan
+        this.usagePlan.addApiKey(this.apiKey);
 
         new cdk.CfnOutput(this, 'UserPoolId', {
             value: this.userPool.userPoolId,
@@ -283,15 +333,26 @@ export class SmartAttendanceTrackerStack extends Stack {
         });
 
         new cdk.CfnOutput(this, 'ApiEndpoint', {
-            value: this.api.apiEndpoint,
+            value: this.api.url,
             description: 'API Gateway endpoint URL',
             exportName: 'SmartAttendanceApiEndpoint',
         });
 
         new cdk.CfnOutput(this, 'ApiId', {
-            value: this.api.httpApiId,
+            value: this.api.restApiId,
             description: 'API Gateway ID',
             exportName: 'SmartAttendanceApiId',
+        });
+
+        new cdk.CfnOutput(this, 'ApiKeyId', {
+            value: this.apiKey.keyId,
+            description: 'API Key ID',
+            exportName: 'SmartAttendanceApiKeyId',
+        });
+
+        new cdk.CfnOutput(this, 'ApiKeyValue', {
+            value: this.apiKey.keyArn,
+            description: 'API Key ARN (retrieve value from console)',
         });
     }
 }

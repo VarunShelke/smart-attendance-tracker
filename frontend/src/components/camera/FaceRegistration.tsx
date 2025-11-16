@@ -18,7 +18,7 @@ const FaceRegistration: React.FC<FaceRegistrationProps> = ({onSuccess}) => {
         registerFace,
     } = useFaceRegistration();
 
-    // Cleanup camera on unmount
+    // Cleanup camera on unmounting
     useEffect(() => {
         return () => {
             stopCamera();
