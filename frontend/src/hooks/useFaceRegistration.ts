@@ -1,7 +1,6 @@
 import React, {useCallback, useRef, useState} from 'react';
-import {uploadData} from 'aws-amplify/storage';
-import {updateUserAttributes} from 'aws-amplify/auth';
 import type {FaceRegistrationState} from '../types/auth';
+import {registerFace, ApiError} from '../services/api';
 
 interface UseFaceRegistrationReturn {
     state: FaceRegistrationState;
@@ -10,8 +9,7 @@ interface UseFaceRegistrationReturn {
     stopCamera: () => void;
     capturePhoto: () => void;
     retakePhoto: () => void;
-    uploadPhoto: (userId: string) => Promise<void>;
-    skipRegistration: () => Promise<void>;
+    registerFace: () => Promise<void>;
 }
 
 export const useFaceRegistration = (): UseFaceRegistrationReturn => {
@@ -129,7 +127,7 @@ export const useFaceRegistration = (): UseFaceRegistrationReturn => {
         startCamera();
     }, [startCamera]);
 
-    const uploadPhoto = useCallback(async (userId: string) => {
+    const handleRegisterFace = useCallback(async () => {
         if (!state.capturedImage) {
             setState(prev => ({...prev, error: 'No photo captured'}));
             return;
@@ -138,31 +136,10 @@ export const useFaceRegistration = (): UseFaceRegistrationReturn => {
         setState(prev => ({...prev, isUploading: true, error: null}));
 
         try {
-            // Convert base64 to Blob
-            const response = await fetch(state.capturedImage);
-            const blob = await response.blob();
+            // Send base64 image to API Gateway
+            await registerFace(state.capturedImage);
 
-            // Upload to S3 with userId as filename
-            // The path uses {identity_id} which AWS Amplify automatically replaces with the Cognito Identity ID
-            const filename = `${userId}.jpg`;
-            const result = await uploadData({
-                path: ({identityId}) => `face-registrations/${identityId}/${filename}`,
-                data: blob,
-                options: {
-                    contentType: 'image/jpeg',
-                },
-            }).result;
-
-            console.log('Photo uploaded successfully:', result);
-
-            // Update Cognito user attribute
-            await updateUserAttributes({
-                userAttributes: {
-                    'custom:faceRegistered': 'true',
-                },
-            });
-
-            console.log('User attribute updated successfully');
+            console.log('Face registered successfully');
 
             setState(prev => ({
                 ...prev,
@@ -171,10 +148,12 @@ export const useFaceRegistration = (): UseFaceRegistrationReturn => {
                 error: null,
             }));
         } catch (error) {
-            console.error('Error uploading photo:', error);
-            let errorMessage = 'Failed to upload photo. Please try again.';
+            console.error('Error registering face:', error);
+            let errorMessage = 'Failed to register face. Please try again.';
 
-            if (error instanceof Error) {
+            if (error instanceof ApiError) {
+                errorMessage = error.message;
+            } else if (error instanceof Error) {
                 errorMessage = error.message || errorMessage;
             }
 
@@ -186,22 +165,6 @@ export const useFaceRegistration = (): UseFaceRegistrationReturn => {
         }
     }, [state.capturedImage]);
 
-    const skipRegistration = useCallback(async () => {
-        try {
-            // Update Cognito user attribute to mark as skipped
-            await updateUserAttributes({
-                userAttributes: {
-                    'custom:faceRegistered': 'false',
-                },
-            });
-
-            console.log('Face registration skipped');
-        } catch (error) {
-            console.error('Error updating skip status:', error);
-            // Don't throw error, allow user to proceed
-        }
-    }, []);
-
     return {
         state,
         videoRef,
@@ -209,7 +172,6 @@ export const useFaceRegistration = (): UseFaceRegistrationReturn => {
         stopCamera,
         capturePhoto,
         retakePhoto,
-        uploadPhoto,
-        skipRegistration,
+        registerFace: handleRegisterFace,
     };
 };

@@ -53,7 +53,6 @@ export interface User {
     firstName?: string;
     lastName?: string;
     userId: string;
-    faceRegistered?: boolean;
 }
 
 export interface FaceRegistrationState {

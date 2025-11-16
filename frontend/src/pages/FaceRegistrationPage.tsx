@@ -11,58 +11,17 @@ const FaceRegistrationPage: React.FC = () => {
     const [isAuthenticating, setIsAuthenticating] = useState(false);
 
     // Get email and password from navigation state (passed from verification page)
-    const {email, password, userId} = location.state || {};
+    const {email, password} = location.state || {};
 
     useEffect(() => {
-        // Redirect if required data is missing (email and userId are required, password is optional)
-        if (!email || !userId) {
+        // Redirect if required data is missing (email is required, password is optional)
+        if (!email) {
             console.error('Missing required authentication data');
             navigate('/dashboard', {replace: true});
         }
-    }, [email, userId, navigate]);
+    }, [email, navigate]);
 
     const handleSuccess = async () => {
-        try {
-            setIsAuthenticating(true);
-
-            // If password is available (coming from signup flow), auto-login
-            if (password) {
-                try {
-                    await signIn({
-                        username: email,
-                        password: password,
-                    });
-                } catch (signInError: unknown) {
-                    // If already signed in, just continue (this can happen if user has an active session)
-                    const error = signInError as {name?: string; message?: string};
-                    if (error.name === 'UserAlreadyAuthenticatedException' ||
-                        error.name === 'NotAuthorizedException' && error.message?.includes('already')) {
-                        console.log('User already authenticated, continuing...');
-                    } else {
-                        // For other errors, rethrow
-                        throw signInError;
-                    }
-                }
-            }
-
-            // Refresh user data to get updated faceRegistered attribute
-            await refreshUser();
-
-            // Navigate to dashboard
-            navigate('/dashboard', {replace: true});
-        } catch (error) {
-            console.error('Error during auto-login:', error);
-            // If auto-login fails, redirect to login page with success message
-            navigate('/login', {
-                replace: true,
-                state: {message: 'Face registered successfully! Please log in.'},
-            });
-        } finally {
-            setIsAuthenticating(false);
-        }
-    };
-
-    const handleSkip = async () => {
         try {
             setIsAuthenticating(true);
 
@@ -93,17 +52,17 @@ const FaceRegistrationPage: React.FC = () => {
             navigate('/dashboard', {replace: true});
         } catch (error) {
             console.error('Error during auto-login:', error);
-            // If auto-login fails, redirect to login page
+            // If auto-login fails, redirect to login page with success message
             navigate('/login', {
                 replace: true,
-                state: {message: 'Account created successfully! Please log in.'},
+                state: {message: 'Face registered successfully! Please log in.'},
             });
         } finally {
             setIsAuthenticating(false);
         }
     };
 
-    if (!userId) {
+    if (!email) {
         return null; // Will redirect via useEffect
     }
 
@@ -154,9 +113,7 @@ const FaceRegistrationPage: React.FC = () => {
 
                     {/* Face Registration Component */}
                     <FaceRegistration
-                        userId={userId}
                         onSuccess={handleSuccess}
-                        onSkip={handleSkip}
                     />
 
                     {/* Info Section */}
@@ -186,10 +143,6 @@ const FaceRegistrationPage: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Footer Note */}
-                <p className="text-center text-sm text-gray-500 mt-6">
-                    You can skip this step and register your face later from your dashboard
-                </p>
             </div>
         </div>
     );
