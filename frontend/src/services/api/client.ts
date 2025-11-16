@@ -34,12 +34,18 @@ export async function authenticatedFetch(
     options: RequestInit = {}
 ): Promise<Response> {
     const idToken = await getIdToken();
+    const apiKey = API_CONFIG.API_KEY;
+
+    if (!apiKey) {
+        throw new ApiError('API key not configured', 500);
+    }
 
     return await fetch(`${API_CONFIG.ENDPOINT}${endpoint}`, {
         ...options,
         headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${idToken}`,
+            'X-Api-Key': apiKey,
             ...options.headers,
         },
     });

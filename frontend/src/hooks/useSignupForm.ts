@@ -98,8 +98,7 @@ export const useSignupForm = (): UseSignupFormReturn => {
                 navigate('/verify-email', {
                     state: {
                         email: formData.email,
-                        password: formData.password, // Pass password for auto-login after face registration
-                        userId: userId, // Pass userId for S3 filename
+                        password: formData.password, // Pass password for auto sign-in after verification
                     },
                 });
             } else if (isSignUpComplete) {

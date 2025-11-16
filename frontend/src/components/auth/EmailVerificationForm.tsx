@@ -1,4 +1,4 @@
-import React, {useEffect} from 'react';
+import React, {useEffect, useRef} from 'react';
 import {useNavigate} from 'react-router-dom';
 import Button from '../ui/Button';
 import Alert from '../ui/Alert';
@@ -8,11 +8,11 @@ import {useVerifyEmail} from '../../hooks/useVerifyEmail';
 interface EmailVerificationFormProps {
     email: string;
     password?: string;
-    userId?: string;
 }
 
-const EmailVerificationForm: React.FC<EmailVerificationFormProps> = ({email, password, userId}) => {
+const EmailVerificationForm: React.FC<EmailVerificationFormProps> = ({email, password}) => {
     const navigate = useNavigate();
+    const hasNavigated = useRef(false); // Track if we've already navigated
     const {
         formData,
         errors,
@@ -25,30 +25,36 @@ const EmailVerificationForm: React.FC<EmailVerificationFormProps> = ({email, pas
         handleSubmit,
         handleResendCode,
         clearError,
-    } = useVerifyEmail(email);
+    } = useVerifyEmail(email, password);
 
-    // Redirect to face registration or login page after successful verification
+    /**
+     * Redirect to face registration after successful verification and sign-in
+     *
+     * After email verification, the user is signed in properly with a complete session.
+     * We navigate immediately to face registration. The AuthProvider will automatically
+     * load the user when the new page mounts, so we don't need to manually refresh.
+     *
+     * This avoids the infinite loop issue that was caused by calling refreshUser(),
+     * which would trigger re-renders and repeated API calls.
+     */
     useEffect(() => {
-        if (isSuccess) {
-            setTimeout(() => {
-                // If we have password and userId, redirect to face registration
-                if (password && userId) {
-                    navigate('/face-registration', {
-                        state: {
-                            email,
-                            password,
-                            userId,
-                        },
-                    });
-                } else {
-                    // Otherwise, redirect to login (fallback)
-                    navigate('/login', {
-                        state: {verificationSuccess: true},
-                    });
-                }
-            }, 2000);
-        }
-    }, [isSuccess, navigate, email, password, userId]);
+        if (!isSuccess || hasNavigated.current) return;
+
+        // Mark that we're navigating to prevent multiple navigation attempts
+        hasNavigated.current = true;
+
+        // Add a small delay to ensure the success message is visible
+        const timer = setTimeout(() => {
+            console.log('Navigating to face registration');
+            navigate('/face-registration', {
+                state: {
+                    email,
+                },
+            });
+        }, 1000);
+
+        return () => clearTimeout(timer);
+    }, [isSuccess, navigate, email]);
 
     // Mask email for privacy (show first char and domain)
     const maskEmail = (email: string): string => {
@@ -99,7 +105,7 @@ const EmailVerificationForm: React.FC<EmailVerificationFormProps> = ({email, pas
                     <div className="mb-6">
                         <Alert
                             type="success"
-                            message="Email verified successfully! Redirecting to login..."
+                            message="Email verified and signed in successfully! Redirecting to face registration..."
                         />
                     </div>
                 )}

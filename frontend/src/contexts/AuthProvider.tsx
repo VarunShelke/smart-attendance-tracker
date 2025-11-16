@@ -1,5 +1,5 @@
 import type {ReactNode} from 'react';
-import React, {useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {fetchUserAttributes, getCurrentUser, signOut as amplifySignOut} from 'aws-amplify/auth';
 import type {User} from '../types/auth';
 import {AuthContext, type AuthContextType} from './AuthContext';
@@ -12,10 +12,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({children}) => {
     const [user, setUser] = useState<User | null>(null);
     const [isLoading, setIsLoading] = useState(true);
 
-    const loadUser = async () => {
+    // Memoize loadUser to prevent recreating the function on every render
+    const loadUser = useCallback(async () => {
         try {
             setIsLoading(true);
+
+            // Get current user first
             const currentUser = await getCurrentUser();
+
+            // Then fetch attributes - this may fail if session is incomplete
             const attributes = await fetchUserAttributes();
 
             setUser({
@@ -25,22 +30,44 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({children}) => {
                 lastName: attributes.family_name,
             });
         } catch (error) {
-            console.log('No authenticated user:', error);
-            setUser(null);
+            // Handle different error scenarios
+            const err = error as {name?: string; message?: string};
+
+            // Expected errors when no user is authenticated
+            if (err.name === 'UserUnAuthenticatedException' ||
+                err.name === 'UserNotFoundException' ||
+                err.name === 'NotAuthorizedException') {
+                // User is not authenticated - this is expected, don't log
+                setUser(null);
+            }
+            // Handle incomplete session state (can happen after confirmSignUp)
+            else if (err.name === 'InvalidParameterException' ||
+                     err.message?.includes('400')) {
+                // Session might be incomplete - log but don't crash
+                console.warn('Incomplete auth session detected, user state will be null:', err.message);
+                setUser(null);
+            }
+            // Unexpected errors
+            else {
+                console.error('Unexpected error loading user:', error);
+                setUser(null);
+            }
         } finally {
             setIsLoading(false);
         }
-    };
+    }, []); // Empty dependency array since this doesn't depend on any props or state
 
     useEffect(() => {
         loadUser();
-    }, []);
+    }, [loadUser]);
 
-    const refreshUser = async () => {
+    // Memoize refreshUser to prevent recreating the function on every render
+    const refreshUser = useCallback(async () => {
         await loadUser();
-    };
+    }, [loadUser]);
 
-    const signOut = async () => {
+    // Memoize signOut to prevent recreating the function on every render
+    const signOut = useCallback(async () => {
         try {
             await amplifySignOut();
             setUser(null);
@@ -48,7 +75,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({children}) => {
             console.error('Error signing out:', error);
             throw error;
         }
-    };
+    }, []);
 
     const value: AuthContextType = {
         user,

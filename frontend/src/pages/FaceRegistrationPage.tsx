@@ -1,88 +1,190 @@
-import React, {useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {useLocation, useNavigate} from 'react-router-dom';
-import {signIn} from 'aws-amplify/auth';
+import {fetchAuthSession} from 'aws-amplify/auth';
 import {useAuth} from '../hooks/useAuth';
 import FaceRegistration from '../components/camera/FaceRegistration';
+import Alert from '../components/ui/Alert';
+
+/**
+ * Session validation state for the face registration flow
+ *
+ * Note: Users arrive here after email verification, which automatically
+ * authenticates them. We only need to validate their session, not sign them in.
+ */
+const SessionState = {
+    IDLE: 'IDLE',
+    VALIDATING: 'VALIDATING',
+    VALID: 'VALID',
+    INVALID: 'INVALID',
+    COMPLETING: 'COMPLETING',
+} as const;
+
+type SessionState = typeof SessionState[keyof typeof SessionState];
+
+interface LocationState {
+    email?: string;
+}
 
 const FaceRegistrationPage: React.FC = () => {
     const navigate = useNavigate();
     const location = useLocation();
     const {refreshUser} = useAuth();
-    const [isAuthenticating, setIsAuthenticating] = useState(false);
 
-    // Get email and password from navigation state (passed from verification page)
-    const {email, password} = location.state || {};
+    // Extract navigation state with type safety
+    const {email} = (location.state as LocationState) || {};
 
-    useEffect(() => {
-        // Redirect if required data is missing (email is required, password is optional)
-        if (!email) {
-            console.error('Missing required authentication data');
-            navigate('/dashboard', {replace: true});
-        }
-    }, [email, navigate]);
+    // Session validation state management
+    const [sessionState, setSessionState] = useState<SessionState>(SessionState.IDLE);
+    const [sessionError, setSessionError] = useState<string | null>(null);
 
-    const handleSuccess = async () => {
+    /**
+     * Validates that the user has a valid authenticated session with available tokens
+     *
+     * Users arrive here after email verification, which automatically authenticates them.
+     * We validate their session to ensure they have valid tokens for API calls.
+     */
+    const validateAndRefreshSession = useCallback(async (): Promise<void> => {
         try {
-            setIsAuthenticating(true);
+            setSessionState(SessionState.VALIDATING);
+            setSessionError(null);
 
-            // If password is available (coming from signup flow), auto-login
-            if (password) {
-                try {
-                    await signIn({
-                        username: email,
-                        password: password,
-                    });
-                } catch (signInError: unknown) {
-                    // If already signed in, just continue (this can happen if user has an active session)
-                    const error = signInError as {name?: string; message?: string};
-                    if (error.name === 'UserAlreadyAuthenticatedException' ||
-                        error.name === 'NotAuthorizedException' && error.message?.includes('already')) {
-                        console.log('User already authenticated, continuing...');
-                    } else {
-                        // For other errors, rethrow
-                        throw signInError;
-                    }
-                }
+            // Fetch the current session
+            const session = await fetchAuthSession();
+
+            // Validate that tokens are present
+            const hasValidTokens = !!(session.tokens?.idToken && session.tokens?.accessToken);
+
+            if (!hasValidTokens) {
+                throw new Error('Session tokens not available');
             }
 
-            // Refresh user data
+            // Refresh user context to get latest user data
+            await refreshUser();
+
+            setSessionState(SessionState.VALID);
+        } catch (error: unknown) {
+            console.error('Session validation failed:', error);
+
+            const err = error as { name?: string; message?: string };
+            const errorMessage = err.message || 'Session validation failed';
+
+            setSessionError(errorMessage);
+            setSessionState(SessionState.INVALID);
+
+            // Redirect to login after brief delay
+            setTimeout(() => {
+                navigate('/login', {
+                    replace: true,
+                    state: {
+                        message: 'Your session has expired. Please sign in again to register your face.',
+                    },
+                });
+            }, 2000);
+        }
+    }, [refreshUser, navigate]);
+
+    /**
+     * Handles successful face registration
+     * Refreshes user data and navigates to dashboard
+     */
+    const handleFaceRegistrationSuccess = useCallback(async () => {
+        try {
+            setSessionState(SessionState.COMPLETING);
+
+            // Refresh user data to reflect the updated face registration status
             await refreshUser();
 
             // Navigate to dashboard
             navigate('/dashboard', {replace: true});
         } catch (error) {
-            console.error('Error during auto-login:', error);
-            // If auto-login fails, redirect to login page with success message
+            console.error('Error completing registration:', error);
+
+            // Even if refresh fails, still redirect to login with success message
             navigate('/login', {
                 replace: true,
                 state: {message: 'Face registered successfully! Please log in.'},
             });
-        } finally {
-            setIsAuthenticating(false);
         }
-    };
+    }, [refreshUser, navigate]);
 
+    /**
+     * Validate required data and session on mount
+     */
+    useEffect(() => {
+        // Redirect if email is missing
+        if (!email) {
+            console.error('Missing required email parameter');
+            navigate('/signup', {replace: true});
+            return;
+        }
+
+        // Validate and refresh the session
+        validateAndRefreshSession();
+    }, [email, navigate, validateAndRefreshSession]);
+
+    // Early return: Missing required data
     if (!email) {
         return null; // Will redirect via useEffect
     }
 
-    if (isAuthenticating) {
+    // Loading state: Validating session
+    if (sessionState === SessionState.VALIDATING) {
         return (
             <div
                 className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 flex items-center justify-center px-4">
                 <div className="text-center">
                     <div
-                        className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto mb-4"></div>
-                    <p className="text-gray-600">Logging you in...</p>
+                        className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto mb-4"
+                        aria-label="Loading"
+                    />
+                    <p className="text-gray-600 font-medium">Validating session...</p>
+                    <p className="text-gray-500 text-sm mt-2">Please wait</p>
                 </div>
             </div>
         );
     }
 
+    // Error state: Session validation failed
+    if (sessionState === SessionState.INVALID && sessionError) {
+        return (
+            <div
+                className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 flex items-center justify-center px-4">
+                <div className="max-w-md w-full">
+                    <Alert
+                        type="error"
+                        message={sessionError}
+                        onClose={() => setSessionError(null)}
+                    />
+                    <p className="text-center text-gray-600 text-sm mt-4">
+                        Redirecting to login...
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
+    // Loading state: Completing registration
+    if (sessionState === SessionState.COMPLETING) {
+        return (
+            <div
+                className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 flex items-center justify-center px-4">
+                <div className="text-center">
+                    <div
+                        className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto mb-4"
+                        aria-label="Loading"
+                    />
+                    <p className="text-gray-600 font-medium">Completing registration...</p>
+                    <p className="text-gray-500 text-sm mt-2">Redirecting to dashboard</p>
+                </div>
+            </div>
+        );
+    }
+
+    // Main content: Show face registration UI only when session is valid
     return (
         <div
             className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 flex items-center justify-center px-4 py-12">
-            <div className="absolute inset-0 bg-grid-pattern opacity-5"></div>
+            <div className="absolute inset-0 bg-grid-pattern opacity-5"/>
             <div className="relative z-10 w-full max-w-2xl">
                 <div className="bg-white rounded-2xl shadow-xl p-8">
                     {/* Header */}
@@ -113,10 +215,10 @@ const FaceRegistrationPage: React.FC = () => {
 
                     {/* Face Registration Component */}
                     <FaceRegistration
-                        onSuccess={handleSuccess}
+                        onSuccess={handleFaceRegistrationSuccess}
                     />
 
-                    {/* Info Section */}
+                    {/* Privacy Information */}
                     <div className="mt-8 pt-6 border-t border-gray-200">
                         <div className="flex items-start space-x-3 text-sm text-gray-600">
                             <svg
@@ -142,7 +244,6 @@ const FaceRegistrationPage: React.FC = () => {
                         </div>
                     </div>
                 </div>
-
             </div>
         </div>
     );
