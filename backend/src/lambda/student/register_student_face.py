@@ -1,18 +1,20 @@
 import base64
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any
 
-from ..utils import aws_utils
-from ..constants import constants
+from utils import aws_utils
+from constants import constants
 
 s3_client = aws_utils.get_client_for_resource('s3')
 cognito_client = aws_utils.get_client_for_resource('cognito-idp')
+dynamodb_client = aws_utils.get_client_for_resource('dynamodb')
 
 # Environment variables
 S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME')
 USER_POOL_ID = os.environ.get('USER_POOL_ID')
+STUDENTS_TABLE_NAME = os.environ.get('STUDENTS_TABLE_NAME')
 API_VERSION = os.environ.get('API_VERSION', 'v1')
 
 
@@ -122,6 +124,26 @@ def handler(event, context):
                 'uploaded_at': timestamp,
             }
         )
+
+        # Update DynamoDB students table with face registration info
+        current_time = datetime.now(timezone.utc).isoformat()
+        try:
+            dynamodb_client.update_item(
+                TableName=STUDENTS_TABLE_NAME,
+                Key={'user_id': {'S': user_id}},
+                UpdateExpression='SET face_registered = :fr, face_s3_key = :s3k, face_registered_at = :fra, updated_at = :ua',
+                ExpressionAttributeValues={
+                    ':fr': {'BOOL': True},
+                    ':s3k': {'S': s3_key},
+                    ':fra': {'S': current_time},
+                    ':ua': {'S': current_time},
+                },
+                ReturnValues='NONE'
+            )
+        except Exception as db_error:
+            # Log the error but don't fail the request since S3 upload succeeded
+            print(f"Warning: Failed to update DynamoDB: {str(db_error)}")
+            print(f"Face image was uploaded to S3 successfully at {s3_key}")
 
         # Return success response
         return create_response(200, {

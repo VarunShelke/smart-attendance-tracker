@@ -7,6 +7,7 @@ import * as s3 from "aws-cdk-lib/aws-s3";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 
 
 export class SmartAttendanceTrackerStack extends Stack {
@@ -14,8 +15,12 @@ export class SmartAttendanceTrackerStack extends Stack {
     public readonly userPoolClient: cognito.UserPoolClient;
     public readonly amplifyApp: amplify.CfnApp;
     public readonly studentImagesBucket: s3.Bucket;
+    public readonly studentsTable: dynamodb.Table;
+    public readonly sharedLambdaLayer: lambda.LayerVersion;
     public readonly registerStudentFaceLambda: lambda.Function;
     public readonly registerStudentFaceLambdaLogGroup: logs.LogGroup;
+    public readonly createStudentProfileLambda: lambda.Function;
+    public readonly createStudentProfileLambdaLogGroup: logs.LogGroup;
     public readonly api: apigateway.RestApi;
     public readonly apiLogGroup: logs.LogGroup;
     public readonly usagePlan: apigateway.UsagePlan;
@@ -54,13 +59,6 @@ export class SmartAttendanceTrackerStack extends Stack {
                     mutable: true,
                 },
             },
-            customAttributes: {
-                faceRegistered: new cognito.StringAttribute({
-                    minLen: 4,
-                    maxLen: 5,
-                    mutable: true,
-                }),
-            },
             passwordPolicy: {
                 minLength: 8,
                 requireLowercase: true,
@@ -89,6 +87,27 @@ export class SmartAttendanceTrackerStack extends Stack {
             },
             removalPolicy: cdk.RemovalPolicy.DESTROY,
             autoDeleteObjects: true,
+        });
+
+        this.studentsTable = new dynamodb.Table(this, 'AttendanceTrackerStudentsTable', {
+            tableName: 'attendance-tracker-students',
+            partitionKey: {
+                name: 'user_id',
+                type: dynamodb.AttributeType.STRING,
+            },
+            pointInTimeRecoverySpecification: {
+                pointInTimeRecoveryEnabled: true,
+                recoveryPeriodInDays: 30
+            },
+            billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+            deletionProtection: false,
+        });
+
+        this.studentsTable.addGlobalSecondaryIndex({
+            indexName: 'email-index',
+            partitionKey: {name: 'email', type: dynamodb.AttributeType.STRING},
+            sortKey: {name: 'created_at', type: dynamodb.AttributeType.STRING},
         });
 
         this.userPoolClient = new cognito.UserPoolClient(this, 'SmartAttendanceUserPoolClient', {
@@ -192,6 +211,60 @@ export class SmartAttendanceTrackerStack extends Stack {
             stage: 'PRODUCTION',
         });
 
+        // Create Lambda Layer for shared code (utils, constants, models)
+        // This layer packages the shared modules (utils, constants, shared) along with dependencies
+        this.sharedLambdaLayer = new lambda.LayerVersion(this, 'SharedLambdaLayer', {
+            layerVersionName: 'smart-attendance-shared-layer',
+            code: lambda.Code.fromAsset('../backend/src/lambda', {
+                bundling: {
+                    image: lambda.Runtime.PYTHON_3_13.bundlingImage,
+                    platform: 'linux/arm64',
+                    command: [
+                        'bash', '-c',
+                        [
+                            'mkdir -p /asset-output/python',
+                            'mkdir -p /asset-output/python/student',
+                            'cp -r /asset-input/utils /asset-output/python/',
+                            'cp -r /asset-input/constants /asset-output/python/',
+                            'cp -r /asset-input/student/shared /asset-output/python/student/',
+                            'pip install -r /asset-input/requirements.txt -t /asset-output/python --upgrade',
+                        ].join(' && ')
+                    ],
+                },
+            }),
+            compatibleRuntimes: [lambda.Runtime.PYTHON_3_13],
+            compatibleArchitectures: [lambda.Architecture.ARM_64],
+            description: 'Shared utilities, constants, and models for Lambda functions',
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+        });
+
+        this.createStudentProfileLambdaLogGroup = new logs.LogGroup(this, 'CreateStudentProfileLogGroup', {
+            logGroupName: '/aws/lambda/create-student-profile',
+            retention: logs.RetentionDays.ONE_WEEK,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+        });
+
+        this.createStudentProfileLambda = new lambda.Function(this, 'CreateStudentProfileFunction', {
+            runtime: lambda.Runtime.PYTHON_3_13,
+            architecture: lambda.Architecture.ARM_64,
+            handler: 'create_student_profile.handler',
+            code: lambda.Code.fromAsset('../backend/src/lambda/student/profile'),
+            functionName: 'create-student-profile',
+            timeout: cdk.Duration.seconds(30),
+            memorySize: 256,
+            logGroup: this.createStudentProfileLambdaLogGroup,
+            layers: [this.sharedLambdaLayer],
+            environment: {
+                STUDENTS_TABLE_NAME: this.studentsTable.tableName,
+            },
+        });
+
+        this.studentsTable.grantWriteData(this.createStudentProfileLambda);
+        this.userPool.addTrigger(
+            cognito.UserPoolOperation.POST_CONFIRMATION,
+            this.createStudentProfileLambda
+        );
+
         this.registerStudentFaceLambdaLogGroup = new logs.LogGroup(this, 'RegisterStudentFaceLogGroup', {
             logGroupName: '/aws/lambda/register-student-face',
             retention: logs.RetentionDays.ONE_WEEK,
@@ -207,15 +280,20 @@ export class SmartAttendanceTrackerStack extends Stack {
             timeout: cdk.Duration.seconds(29),
             memorySize: 512,
             logGroup: this.registerStudentFaceLambdaLogGroup,
+            layers: [this.sharedLambdaLayer],
             environment: {
                 S3_BUCKET_NAME: this.studentImagesBucket.bucketName,
                 USER_POOL_ID: this.userPool.userPoolId,
+                STUDENTS_TABLE_NAME: this.studentsTable.tableName,
                 API_VERSION: 'v1',
             },
         });
 
         // Grant Lambda permissions to write to S3
         this.studentImagesBucket.grantWrite(this.registerStudentFaceLambda, 'face_registrations/*');
+
+        // Grant Lambda permissions to update student records in DynamoDB
+        this.studentsTable.grantWriteData(this.registerStudentFaceLambda);
 
         // Create Cognito User Pool Authorizer for REST API
         const authorizer = new apigateway.CognitoUserPoolsAuthorizer(this, 'CognitoAuthorizer', {
@@ -353,6 +431,30 @@ export class SmartAttendanceTrackerStack extends Stack {
         new cdk.CfnOutput(this, 'ApiKeyValue', {
             value: this.apiKey.keyArn,
             description: 'API Key ARN (retrieve value from console)',
+        });
+
+        new cdk.CfnOutput(this, 'StudentsTableName', {
+            value: this.studentsTable.tableName,
+            description: 'DynamoDB Students Table Name',
+            exportName: 'SmartAttendanceStudentsTableName',
+        });
+
+        new cdk.CfnOutput(this, 'StudentsTableArn', {
+            value: this.studentsTable.tableArn,
+            description: 'DynamoDB Students Table ARN',
+            exportName: 'SmartAttendanceStudentsTableArn',
+        });
+
+        new cdk.CfnOutput(this, 'PostConfirmationLambdaArn', {
+            value: this.createStudentProfileLambda.functionArn,
+            description: 'Post Confirmation Lambda ARN',
+            exportName: 'SmartAttendancePostConfirmationLambdaArn',
+        });
+
+        new cdk.CfnOutput(this, 'PostConfirmationLambdaName', {
+            value: this.createStudentProfileLambda.functionName,
+            description: 'Post Confirmation Lambda Function Name',
+            exportName: 'SmartAttendancePostConfirmationLambdaName',
         });
     }
 }
