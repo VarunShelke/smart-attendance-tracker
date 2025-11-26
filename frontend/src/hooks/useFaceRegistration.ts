@@ -85,7 +85,7 @@ export const useFaceRegistration = (): UseFaceRegistrationReturn => {
         }
 
         try {
-            // Create canvas to capture the current video frame
+            // Create a canvas to capture the current video frame
             const canvas = document.createElement('canvas');
             canvas.width = videoRef.current.videoWidth;
             canvas.height = videoRef.current.videoHeight;
@@ -95,7 +95,7 @@ export const useFaceRegistration = (): UseFaceRegistrationReturn => {
                 throw new Error('Failed to get canvas context');
             }
 
-            // Draw current video frame to canvas
+            // Draw the current video frame to canvas
             context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
 
             // Convert to high-quality JPEG (1.0 = maximum quality for Rekognition)
@@ -136,8 +136,10 @@ export const useFaceRegistration = (): UseFaceRegistrationReturn => {
         setState(prev => ({...prev, isUploading: true, error: null}));
 
         try {
-            // Send base64 image to API Gateway
-            await registerFace(state.capturedImage);
+            // Strip the data URL prefix (e.g., "data:image/jpeg;base64,") before sending
+            // Backend expects pure base64-encoded image data
+            const base64Data = state.capturedImage.replace(/^data:image\/[a-z]+;base64,/, '');
+            await registerFace(base64Data);
 
             console.log('Face registered successfully');
 

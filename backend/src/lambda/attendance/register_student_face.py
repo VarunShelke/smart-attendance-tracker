@@ -4,8 +4,8 @@ import os
 from datetime import datetime, timezone
 from typing import Dict, Any
 
-from utils import aws_utils
 from constants import constants
+from utils import aws_utils
 
 s3_client = aws_utils.get_client_for_resource('s3')
 cognito_client = aws_utils.get_client_for_resource('cognito-idp')
@@ -100,11 +100,14 @@ def handler(event, context):
             })
 
         # Generate S3 key
-        timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+        timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
         s3_key = f"face_registrations/{user_id}/{timestamp}.jpg"
 
-        # Decode base64 image
         try:
+            if face_image.startswith('data:image'):
+                print("Warning: Received data URL format, stripping prefix")
+                face_image = face_image.split(',', 1)[1]
+
             image_data = base64.b64decode(face_image)
         except Exception as e:
             return create_response(400, {
