@@ -8,6 +8,7 @@ import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
 
 
 export class SmartAttendanceTrackerStack extends Stack {
@@ -16,11 +17,16 @@ export class SmartAttendanceTrackerStack extends Stack {
     public readonly amplifyApp: amplify.CfnApp;
     public readonly studentImagesBucket: s3.Bucket;
     public readonly studentsTable: dynamodb.Table;
+    public readonly studentAttendanceTable: dynamodb.Table;
+    public readonly faceComparisonQueue: sqs.Queue;
+    public readonly faceComparisonDLQ: sqs.Queue;
     public readonly sharedLambdaLayer: lambda.LayerVersion;
     public readonly registerStudentFaceLambda: lambda.Function;
     public readonly registerStudentFaceLambdaLogGroup: logs.LogGroup;
     public readonly createStudentProfileLambda: lambda.Function;
     public readonly createStudentProfileLambdaLogGroup: logs.LogGroup;
+    public readonly processAttendanceLambda: lambda.Function;
+    public readonly processAttendanceLambdaLogGroup: logs.LogGroup;
     public readonly api: apigateway.RestApi;
     public readonly apiLogGroup: logs.LogGroup;
     public readonly usagePlan: apigateway.UsagePlan;
@@ -108,6 +114,52 @@ export class SmartAttendanceTrackerStack extends Stack {
             indexName: 'email-index',
             partitionKey: {name: 'email', type: dynamodb.AttributeType.STRING},
             sortKey: {name: 'created_at', type: dynamodb.AttributeType.STRING},
+        });
+
+        // Create a StudentAttendance DynamoDB table for storing attendance records
+        this.studentAttendanceTable = new dynamodb.Table(this, 'StudentAttendanceTable', {
+            tableName: 'attendance-tracker-student-attendance',
+            partitionKey: {
+                name: 'user_id',
+                type: dynamodb.AttributeType.STRING,
+            },
+            sortKey: {
+                name: 'attendance_date',
+                type: dynamodb.AttributeType.STRING,
+            },
+            pointInTimeRecoverySpecification: {
+                pointInTimeRecoveryEnabled: true,
+                recoveryPeriodInDays: 30
+            },
+            billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+            deletionProtection: false,
+        });
+
+        // Add GSI for attendance_id lookups
+        this.studentAttendanceTable.addGlobalSecondaryIndex({
+            indexName: 'attendance-id-index',
+            partitionKey: {name: 'attendance_id', type: dynamodb.AttributeType.STRING},
+        });
+
+        // Create Dead Letter Queue for failed face comparisons
+        this.faceComparisonDLQ = new sqs.Queue(this, 'FaceComparisonDLQ', {
+            queueName: 'face-comparison-dlq',
+            retentionPeriod: cdk.Duration.days(14),
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+        });
+
+        // Create SQS Queue for face comparison processing
+        this.faceComparisonQueue = new sqs.Queue(this, 'FaceComparisonQueue', {
+            queueName: 'face-comparison-queue',
+            visibilityTimeout: cdk.Duration.seconds(45),
+            retentionPeriod: cdk.Duration.days(4),
+            receiveMessageWaitTime: cdk.Duration.seconds(20), // Long polling
+            deadLetterQueue: {
+                queue: this.faceComparisonDLQ,
+                maxReceiveCount: 3,
+            },
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
         });
 
         this.userPoolClient = new cognito.UserPoolClient(this, 'SmartAttendanceUserPoolClient', {
@@ -211,8 +263,6 @@ export class SmartAttendanceTrackerStack extends Stack {
             stage: 'PRODUCTION',
         });
 
-        // Create Lambda Layer for shared code (utils, constants, models)
-        // This layer packages the shared modules (utils, constants, shared) along with dependencies
         this.sharedLambdaLayer = new lambda.LayerVersion(this, 'SharedLambdaLayer', {
             layerVersionName: 'smart-attendance-shared-layer',
             code: lambda.Code.fromAsset('../backend/src/lambda', {
@@ -224,9 +274,11 @@ export class SmartAttendanceTrackerStack extends Stack {
                         [
                             'mkdir -p /asset-output/python',
                             'mkdir -p /asset-output/python/student',
+                            'mkdir -p /asset-output/python/attendance',
                             'cp -r /asset-input/utils /asset-output/python/',
                             'cp -r /asset-input/constants /asset-output/python/',
                             'cp -r /asset-input/student/shared /asset-output/python/student/',
+                            'cp -r /asset-input/attendance/shared /asset-output/python/attendance/',
                             'pip install -r /asset-input/requirements.txt -t /asset-output/python --upgrade',
                         ].join(' && ')
                     ],
@@ -275,7 +327,7 @@ export class SmartAttendanceTrackerStack extends Stack {
             runtime: lambda.Runtime.PYTHON_3_13,
             architecture: lambda.Architecture.ARM_64,
             handler: 'register_student_face.handler',
-            code: lambda.Code.fromAsset('../backend/src/lambda/student'),
+            code: lambda.Code.fromAsset('../backend/src/lambda/attendance'),
             functionName: 'register-student-face',
             timeout: cdk.Duration.seconds(29),
             memorySize: 512,
@@ -294,6 +346,44 @@ export class SmartAttendanceTrackerStack extends Stack {
 
         // Grant Lambda permissions to update student records in DynamoDB
         this.studentsTable.grantWriteData(this.registerStudentFaceLambda);
+
+        // Create process_attendance Lambda function
+        this.processAttendanceLambdaLogGroup = new logs.LogGroup(this, 'ProcessAttendanceLogGroup', {
+            logGroupName: '/aws/lambda/process-attendance',
+            retention: logs.RetentionDays.ONE_WEEK,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+        });
+
+        this.processAttendanceLambda = new lambda.Function(this, 'ProcessAttendanceFunction', {
+            runtime: lambda.Runtime.PYTHON_3_13,
+            architecture: lambda.Architecture.ARM_64,
+            handler: 'process_attendance.handler',
+            code: lambda.Code.fromAsset('../backend/src/lambda/attendance'),
+            functionName: 'process-attendance',
+            timeout: cdk.Duration.seconds(29),
+            memorySize: 512,
+            logGroup: this.processAttendanceLambdaLogGroup,
+            layers: [this.sharedLambdaLayer],
+            environment: {
+                S3_BUCKET_NAME: this.studentImagesBucket.bucketName,
+                STUDENTS_TABLE_NAME: this.studentsTable.tableName,
+                STUDENT_ATTENDANCE_TABLE_NAME: this.studentAttendanceTable.tableName,
+                FACE_COMPARISON_QUEUE_URL: this.faceComparisonQueue.queueUrl,
+                API_VERSION: 'v1',
+            },
+        });
+
+        // Grant Lambda permissions to write to S3 (faces/attendance/*)
+        this.studentImagesBucket.grantWrite(this.processAttendanceLambda, 'faces/attendance/*');
+
+        // Grant Lambda permissions to read from Students table
+        this.studentsTable.grantReadData(this.processAttendanceLambda);
+
+        // Grant Lambda permissions to write to StudentAttendance table
+        this.studentAttendanceTable.grantWriteData(this.processAttendanceLambda);
+
+        // Grant Lambda permissions to send messages to SQS queue
+        this.faceComparisonQueue.grantSendMessages(this.processAttendanceLambda);
 
         // Create Cognito User Pool Authorizer for REST API
         const authorizer = new apigateway.CognitoUserPoolsAuthorizer(this, 'CognitoAuthorizer', {
@@ -331,6 +421,24 @@ export class SmartAttendanceTrackerStack extends Stack {
             apiKeyRequired: true,
         });
 
+        // Create Lambda integration for process_attendance
+        const processAttendanceIntegration = new apigateway.LambdaIntegration(this.processAttendanceLambda, {
+            proxy: true,
+            allowTestInvoke: true,
+        });
+
+        // Add /v1/students/me/attendance endpoint
+        const attendanceResource = meResource.addResource('attendance', {
+            defaultCorsPreflightOptions: corsOptions,
+        });
+
+        // Add POST method for attendance verification
+        attendanceResource.addMethod('POST', processAttendanceIntegration, {
+            authorizer: authorizer,
+            authorizationType: apigateway.AuthorizationType.COGNITO,
+            apiKeyRequired: true,
+        });
+
         // Create API Key for rate limiting
         this.apiKey = new apigateway.ApiKey(this, 'SmartAttendanceApiKey', {
             apiKeyName: 'smart-attendance-api-key',
@@ -338,7 +446,7 @@ export class SmartAttendanceTrackerStack extends Stack {
             enabled: true,
         });
 
-        // Create Usage Plan with rate limiting (1 req/sec, burst 10)
+        // Create a Usage Plan with rate limiting (1 req/sec, burst 10)
         this.usagePlan = new apigateway.UsagePlan(this, 'SmartAttendanceUsagePlan', {
             name: 'smart-attendance-usage-plan',
             description: 'Usage plan with 1 req/sec rate limit',
@@ -443,6 +551,48 @@ export class SmartAttendanceTrackerStack extends Stack {
             value: this.studentsTable.tableArn,
             description: 'DynamoDB Students Table ARN',
             exportName: 'SmartAttendanceStudentsTableArn',
+        });
+
+        new cdk.CfnOutput(this, 'StudentAttendanceTableName', {
+            value: this.studentAttendanceTable.tableName,
+            description: 'DynamoDB Student Attendance Table Name',
+            exportName: 'SmartAttendanceStudentAttendanceTableName',
+        });
+
+        new cdk.CfnOutput(this, 'StudentAttendanceTableArn', {
+            value: this.studentAttendanceTable.tableArn,
+            description: 'DynamoDB Student Attendance Table ARN',
+            exportName: 'SmartAttendanceStudentAttendanceTableArn',
+        });
+
+        new cdk.CfnOutput(this, 'FaceComparisonQueueUrl', {
+            value: this.faceComparisonQueue.queueUrl,
+            description: 'SQS Face Comparison Queue URL',
+            exportName: 'SmartAttendanceFaceComparisonQueueUrl',
+        });
+
+        new cdk.CfnOutput(this, 'FaceComparisonQueueArn', {
+            value: this.faceComparisonQueue.queueArn,
+            description: 'SQS Face Comparison Queue ARN',
+            exportName: 'SmartAttendanceFaceComparisonQueueArn',
+        });
+
+        new cdk.CfnOutput(this, 'FaceComparisonDLQUrl', {
+            value: this.faceComparisonDLQ.queueUrl,
+            description: 'SQS Face Comparison Dead Letter Queue URL',
+            exportName: 'SmartAttendanceFaceComparisonDLQUrl',
+        });
+
+        new cdk.CfnOutput(this, 'ProcessAttendanceLambdaArn', {
+            value: this.processAttendanceLambda.functionArn,
+            description: 'Lambda ARN for Process Attendance',
+            exportName: 'SmartAttendanceProcessAttendanceLambdaArn',
+        });
+
+        new cdk.CfnOutput(this, 'ProcessAttendanceLambdaName', {
+            value: this.processAttendanceLambda.functionName,
+            description: 'Lambda Function Name for Process Attendance',
+            exportName: 'SmartAttendanceProcessAttendanceLambdaName',
         });
 
         new cdk.CfnOutput(this, 'PostConfirmationLambdaArn', {

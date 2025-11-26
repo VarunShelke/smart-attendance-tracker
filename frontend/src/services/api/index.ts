@@ -28,5 +28,6 @@ export {
     getFaceMetadata,
     updateFace,
     deleteFace,
+    markAttendance,
     type FaceMetadata,
 } from './endpoints/students';
