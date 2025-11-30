@@ -46,7 +46,7 @@ const ProfilePage: React.FC = () => {
         setPhoneNumber(value);
 
         // Validate phone number format
-        if (value && !/^\+?\d{10,15}$/.test(value.replace(/[\s\-\(\)\.]/g, ''))) {
+        if (value && !/^\+?\d{10,15}$/.test(value.replace(/[\s\-().]/g, ''))) {
             setPhoneError('Phone number must contain 10-15 digits and may start with +');
         } else {
             setPhoneError(null);
