@@ -56,9 +56,13 @@ const DashboardPage: React.FC = () => {
             <header className="bg-white shadow-sm">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="flex justify-between items-center h-16">
-                        <h1 className="text-2xl font-bold text-gray-900">
-                            Smart Attendance Tracker
-                        </h1>
+                        <div className="flex items-center">
+                            <img
+                                src="/favicon.png"
+                                alt="Smart Attendance Tracker"
+                                className="h-8 w-auto"
+                            />
+                        </div>
 
                         <div className="flex items-center gap-4">
                             {/* Mark Attendance Button */}
@@ -160,10 +164,48 @@ const DashboardPage: React.FC = () => {
                                     </div>
 
                                     <button
+                                        onClick={() => {
+                                            setShowUserMenu(false);
+                                            navigate('/profile');
+                                        }}
+                                        className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center"
+                                    >
+                                        <svg
+                                            className="w-4 h-4 mr-3 text-gray-500"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            viewBox="0 0 24 24"
+                                        >
+                                            <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                strokeWidth={2}
+                                                d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                                            />
+                                        </svg>
+                                        View Profile
+                                    </button>
+
+                                    <div className="border-t border-gray-200 my-1"></div>
+
+                                    <button
                                         onClick={handleSignOut}
                                         disabled={isSigningOut}
-                                        className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                        className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
                                     >
+                                        <svg
+                                            className="w-4 h-4 mr-3 text-red-600"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            viewBox="0 0 24 24"
+                                        >
+                                            <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                strokeWidth={2}
+                                                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                                            />
+                                        </svg>
                                         {isSigningOut ? 'Signing out...' : 'Sign out'}
                                     </button>
                                 </div>

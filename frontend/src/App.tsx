@@ -4,6 +4,7 @@ import LoginPage from './pages/LoginPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
 import FaceRegistrationPage from './pages/FaceRegistrationPage';
 import DashboardPage from './pages/DashboardPage';
+import ProfilePage from './pages/ProfilePage';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import {AuthProvider} from './contexts/AuthProvider';
 import './config/amplify';
@@ -23,6 +24,14 @@ function App() {
                         element={
                             <ProtectedRoute>
                                 <DashboardPage/>
+                            </ProtectedRoute>
+                        }
+                    />
+                    <Route
+                        path="/profile"
+                        element={
+                            <ProtectedRoute>
+                                <ProfilePage/>
                             </ProtectedRoute>
                         }
                     />
