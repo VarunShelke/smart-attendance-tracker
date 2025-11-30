@@ -9,6 +9,9 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
+import * as sns from 'aws-cdk-lib/aws-sns';
+import * as lambda_event_sources from 'aws-cdk-lib/aws-lambda-event-sources';
+import * as iam from 'aws-cdk-lib/aws-iam';
 
 
 export class SmartAttendanceTrackerStack extends Stack {
@@ -20,6 +23,7 @@ export class SmartAttendanceTrackerStack extends Stack {
     public readonly studentAttendanceTable: dynamodb.Table;
     public readonly faceComparisonQueue: sqs.Queue;
     public readonly faceComparisonDLQ: sqs.Queue;
+    public readonly attendanceNotificationTopic: sns.Topic;
     public readonly sharedLambdaLayer: lambda.LayerVersion;
     public readonly registerStudentFaceLambda: lambda.Function;
     public readonly registerStudentFaceLambdaLogGroup: logs.LogGroup;
@@ -27,6 +31,8 @@ export class SmartAttendanceTrackerStack extends Stack {
     public readonly createStudentProfileLambdaLogGroup: logs.LogGroup;
     public readonly processAttendanceLambda: lambda.Function;
     public readonly processAttendanceLambdaLogGroup: logs.LogGroup;
+    public readonly compareStudentFaceLambda: lambda.Function;
+    public readonly compareStudentFaceLambdaLogGroup: logs.LogGroup;
     public readonly api: apigateway.RestApi;
     public readonly apiLogGroup: logs.LogGroup;
     public readonly usagePlan: apigateway.UsagePlan;
@@ -160,6 +166,12 @@ export class SmartAttendanceTrackerStack extends Stack {
                 maxReceiveCount: 3,
             },
             removalPolicy: cdk.RemovalPolicy.DESTROY,
+        });
+
+        // Create SNS Topic for attendance notifications
+        this.attendanceNotificationTopic = new sns.Topic(this, 'AttendanceNotificationTopic', {
+            topicName: 'attendance-notifications',
+            displayName: 'Pitt Attendance Notifications',
         });
 
         this.userPoolClient = new cognito.UserPoolClient(this, 'SmartAttendanceUserPoolClient', {
@@ -308,10 +320,22 @@ export class SmartAttendanceTrackerStack extends Stack {
             layers: [this.sharedLambdaLayer],
             environment: {
                 STUDENTS_TABLE_NAME: this.studentsTable.tableName,
+                SNS_TOPIC_ARN: this.attendanceNotificationTopic.topicArn,
             },
         });
 
         this.studentsTable.grantWriteData(this.createStudentProfileLambda);
+
+        // Grant SNS permissions to create_student_profile Lambda
+        this.attendanceNotificationTopic.grantPublish(this.createStudentProfileLambda);
+
+        // Grant SNS subscribe permission to create_student_profile Lambda
+        this.createStudentProfileLambda.addToRolePolicy(new iam.PolicyStatement({
+            effect: iam.Effect.ALLOW,
+            actions: ['sns:Subscribe'],
+            resources: [this.attendanceNotificationTopic.topicArn],
+        }));
+
         this.userPool.addTrigger(
             cognito.UserPoolOperation.POST_CONFIRMATION,
             this.createStudentProfileLambda
@@ -384,6 +408,60 @@ export class SmartAttendanceTrackerStack extends Stack {
 
         // Grant Lambda permissions to send messages to SQS queue
         this.faceComparisonQueue.grantSendMessages(this.processAttendanceLambda);
+
+        // Create the compare_student_face Lambda function
+        this.compareStudentFaceLambdaLogGroup = new logs.LogGroup(this, 'CompareStudentFaceLogGroup', {
+            logGroupName: '/aws/lambda/compare-student-face',
+            retention: logs.RetentionDays.ONE_WEEK,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+        });
+
+        this.compareStudentFaceLambda = new lambda.Function(this, 'CompareStudentFaceFunction', {
+            runtime: lambda.Runtime.PYTHON_3_13,
+            architecture: lambda.Architecture.ARM_64,
+            handler: 'compare_student_face.handler',
+            code: lambda.Code.fromAsset('../backend/src/lambda/attendance'),
+            functionName: 'compare-student-face',
+            timeout: cdk.Duration.seconds(45),
+            memorySize: 512,
+            logGroup: this.compareStudentFaceLambdaLogGroup,
+            layers: [this.sharedLambdaLayer],
+            environment: {
+                S3_BUCKET_NAME: this.studentImagesBucket.bucketName,
+                STUDENTS_TABLE_NAME: this.studentsTable.tableName,
+                STUDENT_ATTENDANCE_TABLE_NAME: this.studentAttendanceTable.tableName,
+                FACE_SIMILARITY_THRESHOLD: '80.0',
+                SNS_TOPIC_ARN: this.attendanceNotificationTopic.topicArn,
+            },
+            reservedConcurrentExecutions: 10,
+        });
+
+        // Grant Lambda permissions to read from S3 (both face_registrations and faces/attendance)
+        this.studentImagesBucket.grantRead(this.compareStudentFaceLambda, 'face_registrations/*');
+        this.studentImagesBucket.grantRead(this.compareStudentFaceLambda, 'faces/attendance/*');
+
+        // Grant Lambda permissions to read from the Students table
+        this.studentsTable.grantReadData(this.compareStudentFaceLambda);
+
+        // Grant Lambda permissions to write to the StudentAttendance table
+        this.studentAttendanceTable.grantWriteData(this.compareStudentFaceLambda);
+
+        // Grant Lambda permissions to use Rekognition
+        this.compareStudentFaceLambda.addToRolePolicy(new iam.PolicyStatement({
+            effect: iam.Effect.ALLOW,
+            actions: ['rekognition:CompareFaces'],
+            resources: ['*'],
+        }));
+
+        // Grant SNS publish permission to compare_student_face Lambda
+        this.attendanceNotificationTopic.grantPublish(this.compareStudentFaceLambda);
+
+        // Configure SQS event source mapping with a batch size of 5
+        this.compareStudentFaceLambda.addEventSource(new lambda_event_sources.SqsEventSource(this.faceComparisonQueue, {
+            batchSize: 5,
+            maxBatchingWindow: cdk.Duration.seconds(5),
+            reportBatchItemFailures: true,
+        }));
 
         // Create Cognito User Pool Authorizer for REST API
         const authorizer = new apigateway.CognitoUserPoolsAuthorizer(this, 'CognitoAuthorizer', {
@@ -605,6 +683,30 @@ export class SmartAttendanceTrackerStack extends Stack {
             value: this.createStudentProfileLambda.functionName,
             description: 'Post Confirmation Lambda Function Name',
             exportName: 'SmartAttendancePostConfirmationLambdaName',
+        });
+
+        new cdk.CfnOutput(this, 'CompareStudentFaceLambdaArn', {
+            value: this.compareStudentFaceLambda.functionArn,
+            description: 'Lambda ARN for Compare Student Face',
+            exportName: 'SmartAttendanceCompareStudentFaceLambdaArn',
+        });
+
+        new cdk.CfnOutput(this, 'CompareStudentFaceLambdaName', {
+            value: this.compareStudentFaceLambda.functionName,
+            description: 'Lambda Function Name for Compare Student Face',
+            exportName: 'SmartAttendanceCompareStudentFaceLambdaName',
+        });
+
+        new cdk.CfnOutput(this, 'AttendanceNotificationTopicArn', {
+            value: this.attendanceNotificationTopic.topicArn,
+            description: 'SNS Topic ARN for Attendance Notifications',
+            exportName: 'SmartAttendanceNotificationTopicArn',
+        });
+
+        new cdk.CfnOutput(this, 'AttendanceNotificationTopicName', {
+            value: this.attendanceNotificationTopic.topicName,
+            description: 'SNS Topic Name for Attendance Notifications',
+            exportName: 'SmartAttendanceNotificationTopicName',
         });
     }
 }
