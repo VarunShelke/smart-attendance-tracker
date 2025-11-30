@@ -29,5 +29,8 @@ export {
     updateFace,
     deleteFace,
     markAttendance,
+    getStudentProfile,
+    updateStudentProfile,
     type FaceMetadata,
+    type UpdateStudentProfileData,
 } from './endpoints/students';

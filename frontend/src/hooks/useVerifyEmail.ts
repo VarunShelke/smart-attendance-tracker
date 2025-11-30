@@ -97,7 +97,7 @@ export const useVerifyEmail = (email: string, password?: string): UseVerifyEmail
                     try {
                         await signOut();
                         console.log('Signed out auto-authenticated session');
-                    } catch (signOutError) {
+                    } catch {
                         // If sign out fails, the user wasn't signed in - that's fine
                         console.log('No auto-authenticated session to sign out');
                     }

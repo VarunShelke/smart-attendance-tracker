@@ -11,6 +11,7 @@ import {authenticatedFetch} from '../client';
 import {API_ROUTES} from '../config';
 import {ApiError} from '../errors';
 import type {AttendanceResponse} from '../../../types/attendance';
+import type {StudentProfile} from '../../../types/student';
 
 export interface FaceMetadata {
     registered: boolean;
@@ -167,6 +168,131 @@ export async function markAttendance(imageBase64: string): Promise<AttendanceRes
         }
 
         console.error('Mark attendance error:', error);
+        throw new ApiError(
+            'Network error. Please check your connection and try again.',
+            0
+        );
+    }
+}
+
+/**
+ * Get the current student's profile information
+ *
+ * @returns Promise with student profile data
+ * @throws {ApiError} If the request fails
+ */
+export async function getStudentProfile(): Promise<StudentProfile> {
+    try {
+        const response = await authenticatedFetch(API_ROUTES.STUDENTS.ME.BASE, {
+            method: 'GET',
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+
+            // Map specific error codes to user-friendly messages
+            if (response.status === 401) {
+                throw new ApiError('Authentication failed. Please log in again.', 401);
+            } else if (response.status === 404) {
+                throw new ApiError('Student profile not found.', 404);
+            } else if (response.status === 429) {
+                throw new ApiError(
+                    'Too many requests. Please wait a moment and try again.',
+                    429
+                );
+            } else {
+                throw new ApiError(
+                    errorData.message || 'Failed to fetch profile. Please try again.',
+                    response.status,
+                    errorData
+                );
+            }
+        }
+
+        return await response.json();
+    } catch (error) {
+        if (error instanceof ApiError) {
+            throw error;
+        }
+
+        console.error('Get student profile error:', error);
+        throw new ApiError(
+            'Network error. Please check your connection and try again.',
+            0
+        );
+    }
+}
+
+/**
+ * Update profile data for updateStudentProfile
+ */
+export interface UpdateStudentProfileData {
+    student_id?: string;
+    phone_number?: string;
+}
+
+/**
+ * Update the current student's profile information
+ *
+ * @param data - Profile fields to update (student_id and/or phone_number)
+ * @returns Promise with updated student profile data
+ * @throws {ApiError} If the request fails
+ */
+export async function updateStudentProfile(
+    data: UpdateStudentProfileData
+): Promise<StudentProfile> {
+    try {
+        const response = await authenticatedFetch(API_ROUTES.STUDENTS.ME.BASE, {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+
+            // Map specific error codes to user-friendly messages
+            if (response.status === 400) {
+                throw new ApiError(
+                    errorData.message || 'Invalid profile data. Please check your input.',
+                    400,
+                    errorData
+                );
+            } else if (response.status === 401) {
+                throw new ApiError('Authentication failed. Please log in again.', 401);
+            } else if (response.status === 403) {
+                throw new ApiError(
+                    errorData.message || 'Student ID can only be set once and cannot be changed.',
+                    403,
+                    errorData
+                );
+            } else if (response.status === 404) {
+                throw new ApiError('Student profile not found.', 404);
+            } else if (response.status === 409) {
+                throw new ApiError(
+                    'Profile update conflict. Please refresh and try again.',
+                    409
+                );
+            } else if (response.status === 429) {
+                throw new ApiError(
+                    'Too many requests. Please wait a moment and try again.',
+                    429
+                );
+            } else {
+                throw new ApiError(
+                    errorData.message || 'Failed to update profile. Please try again.',
+                    response.status,
+                    errorData
+                );
+            }
+        }
+
+        return await response.json();
+    } catch (error) {
+        if (error instanceof ApiError) {
+            throw error;
+        }
+
+        console.error('Update student profile error:', error);
         throw new ApiError(
             'Network error. Please check your connection and try again.',
             0

@@ -29,6 +29,10 @@ export class SmartAttendanceTrackerStack extends Stack {
     public readonly registerStudentFaceLambdaLogGroup: logs.LogGroup;
     public readonly createStudentProfileLambda: lambda.Function;
     public readonly createStudentProfileLambdaLogGroup: logs.LogGroup;
+    public readonly getStudentProfileLambda: lambda.Function;
+    public readonly getStudentProfileLambdaLogGroup: logs.LogGroup;
+    public readonly updateStudentProfileLambda: lambda.Function;
+    public readonly updateStudentProfileLambdaLogGroup: logs.LogGroup;
     public readonly processAttendanceLambda: lambda.Function;
     public readonly processAttendanceLambdaLogGroup: logs.LogGroup;
     public readonly compareStudentFaceLambda: lambda.Function;
@@ -341,6 +345,52 @@ export class SmartAttendanceTrackerStack extends Stack {
             this.createStudentProfileLambda
         );
 
+        this.getStudentProfileLambdaLogGroup = new logs.LogGroup(this, 'GetStudentProfileLogGroup', {
+            logGroupName: '/aws/lambda/get-student-profile',
+            retention: logs.RetentionDays.ONE_WEEK,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+        });
+
+        this.getStudentProfileLambda = new lambda.Function(this, 'GetStudentProfileFunction', {
+            runtime: lambda.Runtime.PYTHON_3_13,
+            architecture: lambda.Architecture.ARM_64,
+            handler: 'get_student_profile.handler',
+            code: lambda.Code.fromAsset('../backend/src/lambda/student/profile'),
+            functionName: 'get-student-profile',
+            timeout: cdk.Duration.seconds(10),
+            memorySize: 256,
+            logGroup: this.getStudentProfileLambdaLogGroup,
+            layers: [this.sharedLambdaLayer],
+            environment: {
+                STUDENTS_TABLE_NAME: this.studentsTable.tableName,
+            },
+        });
+
+        this.studentsTable.grantReadData(this.getStudentProfileLambda);
+
+        this.updateStudentProfileLambdaLogGroup = new logs.LogGroup(this, 'UpdateStudentProfileLogGroup', {
+            logGroupName: '/aws/lambda/update-student-profile',
+            retention: logs.RetentionDays.ONE_WEEK,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+        });
+
+        this.updateStudentProfileLambda = new lambda.Function(this, 'UpdateStudentProfileFunction', {
+            runtime: lambda.Runtime.PYTHON_3_13,
+            architecture: lambda.Architecture.ARM_64,
+            handler: 'update_student_profile.handler',
+            code: lambda.Code.fromAsset('../backend/src/lambda/student/profile'),
+            functionName: 'update-student-profile',
+            timeout: cdk.Duration.seconds(10),
+            memorySize: 256,
+            logGroup: this.updateStudentProfileLambdaLogGroup,
+            layers: [this.sharedLambdaLayer],
+            environment: {
+                STUDENTS_TABLE_NAME: this.studentsTable.tableName,
+            },
+        });
+
+        this.studentsTable.grantReadWriteData(this.updateStudentProfileLambda);
+
         this.registerStudentFaceLambdaLogGroup = new logs.LogGroup(this, 'RegisterStudentFaceLogGroup', {
             logGroupName: '/aws/lambda/register-student-face',
             retention: logs.RetentionDays.ONE_WEEK,
@@ -512,6 +562,32 @@ export class SmartAttendanceTrackerStack extends Stack {
 
         // Add POST method for attendance verification
         attendanceResource.addMethod('POST', processAttendanceIntegration, {
+            authorizer: authorizer,
+            authorizationType: apigateway.AuthorizationType.COGNITO,
+            apiKeyRequired: true,
+        });
+
+        // Create Lambda integration for get_student_profile
+        const getStudentProfileIntegration = new apigateway.LambdaIntegration(this.getStudentProfileLambda, {
+            proxy: true,
+            allowTestInvoke: true,
+        });
+
+        // Add GET method to /v1/students/me endpoint for retrieving profile
+        meResource.addMethod('GET', getStudentProfileIntegration, {
+            authorizer: authorizer,
+            authorizationType: apigateway.AuthorizationType.COGNITO,
+            apiKeyRequired: true,
+        });
+
+        // Create Lambda integration for update_student_profile
+        const updateStudentProfileIntegration = new apigateway.LambdaIntegration(this.updateStudentProfileLambda, {
+            proxy: true,
+            allowTestInvoke: true,
+        });
+
+        // Add POST method to /v1/students/me endpoint for updating profile
+        meResource.addMethod('POST', updateStudentProfileIntegration, {
             authorizer: authorizer,
             authorizationType: apigateway.AuthorizationType.COGNITO,
             apiKeyRequired: true,
@@ -707,6 +783,30 @@ export class SmartAttendanceTrackerStack extends Stack {
             value: this.attendanceNotificationTopic.topicName,
             description: 'SNS Topic Name for Attendance Notifications',
             exportName: 'SmartAttendanceNotificationTopicName',
+        });
+
+        new cdk.CfnOutput(this, 'GetStudentProfileLambdaArn', {
+            value: this.getStudentProfileLambda.functionArn,
+            description: 'Lambda ARN for Get Student Profile',
+            exportName: 'SmartAttendanceGetStudentProfileLambdaArn',
+        });
+
+        new cdk.CfnOutput(this, 'GetStudentProfileLambdaName', {
+            value: this.getStudentProfileLambda.functionName,
+            description: 'Lambda Function Name for Get Student Profile',
+            exportName: 'SmartAttendanceGetStudentProfileLambdaName',
+        });
+
+        new cdk.CfnOutput(this, 'UpdateStudentProfileLambdaArn', {
+            value: this.updateStudentProfileLambda.functionArn,
+            description: 'Lambda ARN for Update Student Profile',
+            exportName: 'SmartAttendanceUpdateStudentProfileLambdaArn',
+        });
+
+        new cdk.CfnOutput(this, 'UpdateStudentProfileLambdaName', {
+            value: this.updateStudentProfileLambda.functionName,
+            description: 'Lambda Function Name for Update Student Profile',
+            exportName: 'SmartAttendanceUpdateStudentProfileLambdaName',
         });
     }
 }
