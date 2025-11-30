@@ -6,10 +6,14 @@ from botocore.exceptions import ClientError
 
 from student.shared.model.StudentModel import StudentModel
 from utils import aws_utils
+from utils.sns_utils import subscribe_user_to_notifications
 
 dynamodb = aws_utils.get_dynamodb_resource()
 table_name = os.environ.get('STUDENTS_TABLE_NAME', 'students')
 students_table = dynamodb.Table(table_name)
+
+# SNS topic ARN for attendance notifications
+SNS_TOPIC_ARN = os.environ.get('SNS_TOPIC_ARN')
 
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -31,6 +35,22 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         current_time = datetime.now(timezone.utc)
 
+        # Subscribe user to SNS notification topic
+        subscription_arn = None
+
+        if SNS_TOPIC_ARN:
+            try:
+                subscription_arn = subscribe_user_to_notifications(
+                    topic_arn=SNS_TOPIC_ARN,
+                    user_email=email
+                )
+                print(f"Successfully subscribed {email} to SNS topic. ARN: {subscription_arn}")
+            except Exception as e:
+                print(f"Failed to subscribe to SNS topic: {str(e)}")
+                # Continue with profile creation even if SNS subscription fails
+        else:
+            print("SNS topic ARN not configured, skipping subscription")
+
         student = StudentModel(
             user_id=user_id,
             student_id=None,
@@ -41,6 +61,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             face_registered=False,
             face_s3_key=None,
             face_registered_at=None,
+            sns_subscription_arn=subscription_arn,
             created_at=current_time,
             updated_at=current_time,
         )

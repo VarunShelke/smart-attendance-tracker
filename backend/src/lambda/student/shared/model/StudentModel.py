@@ -15,6 +15,7 @@ class StudentModel(BaseModel):
     face_registered: bool = False
     face_s3_key: Optional[str] = None
     face_registered_at: Optional[datetime] = None
+    sns_subscription_arn: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -67,6 +68,7 @@ class StudentModel(BaseModel):
             'face_registered': self.face_registered,
             'face_s3_key': self.face_s3_key,
             'face_registered_at': self.face_registered_at.isoformat() if self.face_registered_at else None,
+            'sns_subscription_arn': self.sns_subscription_arn,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
         }

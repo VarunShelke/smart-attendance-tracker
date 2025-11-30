@@ -1,7 +1,8 @@
 import uuid
+from decimal import Decimal
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -86,6 +87,10 @@ class AttendanceModel(BaseModel):
             data['created_at'] = datetime.fromisoformat(data['created_at'])
         if 'verified_at' in data and data['verified_at'] and isinstance(data['verified_at'], str):
             data['verified_at'] = datetime.fromisoformat(data['verified_at'])
+
+        # Convert Decimal to float for similarity_score (DynamoDB returns Decimal)
+        if 'similarity_score' in data and isinstance(data['similarity_score'], Decimal):
+            data['similarity_score'] = float(data['similarity_score'])
 
         return cls(**data)
 

@@ -163,7 +163,8 @@ def handler(event, context):
                 FACE_COMPARISON_QUEUE_URL,
                 user_id,
                 tracking_id,
-                face_s3_key
+                face_s3_key,
+                attendance.attendance_date.isoformat()
             )
             logger.info(f"Sent message to SQS queue for tracking_id: {tracking_id}")
         except Exception as e:
@@ -173,12 +174,11 @@ def handler(event, context):
                 'message': 'Failed to queue attendance verification'
             })
 
-        # Return success response with tracking_id and SSE stream URL
+        # Return success response with tracking_id
         return create_response(200, {
             'tracking_id': tracking_id,
             'status': 'processing',
-            'sse_stream_url': f'/api/{API_VERSION}/attendance/stream/{tracking_id}',
-            'message': 'Attendance verification in progress'
+            'message': 'Attendance verification in progress. You will receive an email notification with the results shortly.'
         })
 
     except Exception as e:
