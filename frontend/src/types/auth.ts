@@ -53,7 +53,16 @@ export interface User {
     firstName?: string;
     lastName?: string;
     userId: string;
+    groups?: string[]; // Cognito groups/roles
 }
+
+export const UserRole = {
+    ADMIN: 'Admin',
+    INSTRUCTOR: 'Instructor',
+    STUDENT: 'Student'
+} as const;
+
+export type UserRole = typeof UserRole[keyof typeof UserRole];
 
 export interface FaceRegistrationState {
     isCapturing: boolean;

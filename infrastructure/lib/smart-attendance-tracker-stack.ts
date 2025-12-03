@@ -21,6 +21,8 @@ export class SmartAttendanceTrackerStack extends Stack {
     public readonly studentImagesBucket: s3.Bucket;
     public readonly studentsTable: dynamodb.Table;
     public readonly studentAttendanceTable: dynamodb.Table;
+    public readonly classSchedulesTable: dynamodb.Table;
+    public readonly universitiesTable: dynamodb.Table;
     public readonly faceComparisonQueue: sqs.Queue;
     public readonly faceComparisonDLQ: sqs.Queue;
     public readonly attendanceNotificationTopic: sns.Topic;
@@ -37,6 +39,14 @@ export class SmartAttendanceTrackerStack extends Stack {
     public readonly processAttendanceLambdaLogGroup: logs.LogGroup;
     public readonly compareStudentFaceLambda: lambda.Function;
     public readonly compareStudentFaceLambdaLogGroup: logs.LogGroup;
+    public readonly getUniversityLambda: lambda.Function;
+    public readonly getUniversityLambdaLogGroup: logs.LogGroup;
+    public readonly upsertUniversityLambda: lambda.Function;
+    public readonly upsertUniversityLambdaLogGroup: logs.LogGroup;
+    public readonly getScheduleLambda: lambda.Function;
+    public readonly getScheduleLambdaLogGroup: logs.LogGroup;
+    public readonly upsertScheduleLambda: lambda.Function;
+    public readonly upsertScheduleLambdaLogGroup: logs.LogGroup;
     public readonly api: apigateway.RestApi;
     public readonly apiLogGroup: logs.LogGroup;
     public readonly usagePlan: apigateway.UsagePlan;
@@ -89,6 +99,28 @@ export class SmartAttendanceTrackerStack extends Stack {
                 sms: false,
                 otp: true,
             },
+        });
+
+        // Create Cognito User Pool Groups for role-based access control
+        const adminGroup = new cognito.CfnUserPoolGroup(this, 'AdminGroup', {
+            userPoolId: this.userPool.userPoolId,
+            groupName: 'Admin',
+            description: 'Administrators with full system access',
+            precedence: 0,
+        });
+
+        const instructorGroup = new cognito.CfnUserPoolGroup(this, 'InstructorGroup', {
+            userPoolId: this.userPool.userPoolId,
+            groupName: 'Instructor',
+            description: 'Instructors who manage courses',
+            precedence: 10,
+        });
+
+        const studentGroup = new cognito.CfnUserPoolGroup(this, 'StudentGroup', {
+            userPoolId: this.userPool.userPoolId,
+            groupName: 'Student',
+            description: 'Students who mark attendance',
+            precedence: 20,
         });
 
         // Create an S3 bucket for storing face registration images
@@ -150,6 +182,44 @@ export class SmartAttendanceTrackerStack extends Stack {
         this.studentAttendanceTable.addGlobalSecondaryIndex({
             indexName: 'attendance-id-index',
             partitionKey: {name: 'attendance_id', type: dynamodb.AttributeType.STRING},
+        });
+
+        // Create ClassSchedules DynamoDB table for storing course schedules
+        this.classSchedulesTable = new dynamodb.Table(this, 'ClassSchedulesTable', {
+            tableName: 'attendance-tracker-class-schedules',
+            partitionKey: {
+                name: 'schedule_id',
+                type: dynamodb.AttributeType.STRING,
+            },
+            pointInTimeRecoverySpecification: {
+                pointInTimeRecoveryEnabled: true,
+                recoveryPeriodInDays: 30
+            },
+            billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+            deletionProtection: false,
+        });
+
+        // Create Universities DynamoDB table for storing university information
+        this.universitiesTable = new dynamodb.Table(this, 'UniversitiesTable', {
+            tableName: 'attendance-tracker-universities',
+            partitionKey: {
+                name: 'university_id',
+                type: dynamodb.AttributeType.STRING,
+            },
+            pointInTimeRecoverySpecification: {
+                pointInTimeRecoveryEnabled: true,
+                recoveryPeriodInDays: 30
+            },
+            billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+            deletionProtection: false,
+        });
+
+        // Add GSI for university_code lookups
+        this.universitiesTable.addGlobalSecondaryIndex({
+            indexName: 'university-code-index',
+            partitionKey: {name: 'university_code', type: dynamodb.AttributeType.STRING},
         });
 
         // Create Dead Letter Queue for failed face comparisons
@@ -291,10 +361,14 @@ export class SmartAttendanceTrackerStack extends Stack {
                             'mkdir -p /asset-output/python',
                             'mkdir -p /asset-output/python/student',
                             'mkdir -p /asset-output/python/attendance',
+                            'mkdir -p /asset-output/python/university',
+                            'mkdir -p /asset-output/python/schedule',
                             'cp -r /asset-input/utils /asset-output/python/',
                             'cp -r /asset-input/constants /asset-output/python/',
                             'cp -r /asset-input/student/shared /asset-output/python/student/',
                             'cp -r /asset-input/attendance/shared /asset-output/python/attendance/',
+                            'cp -r /asset-input/university/shared /asset-output/python/university/',
+                            'cp -r /asset-input/schedule/shared /asset-output/python/schedule/',
                             'pip install -r /asset-input/requirements.txt -t /asset-output/python --upgrade',
                         ].join(' && ')
                     ],
@@ -338,6 +412,14 @@ export class SmartAttendanceTrackerStack extends Stack {
             effect: iam.Effect.ALLOW,
             actions: ['sns:Subscribe'],
             resources: [this.attendanceNotificationTopic.topicArn],
+        }));
+
+        // Grant Cognito permissions to create_student_profile Lambda for group assignment
+        // Note: Using wildcard to avoid circular dependency with UserPool trigger
+        this.createStudentProfileLambda.addToRolePolicy(new iam.PolicyStatement({
+            effect: iam.Effect.ALLOW,
+            actions: ['cognito-idp:AdminAddUserToGroup'],
+            resources: ['*'],
         }));
 
         this.userPool.addTrigger(
@@ -390,6 +472,100 @@ export class SmartAttendanceTrackerStack extends Stack {
         });
 
         this.studentsTable.grantReadWriteData(this.updateStudentProfileLambda);
+
+        // University Lambda Functions
+        this.getUniversityLambdaLogGroup = new logs.LogGroup(this, 'GetUniversityLogGroup', {
+            logGroupName: '/aws/lambda/get-university',
+            retention: logs.RetentionDays.ONE_WEEK,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+        });
+
+        this.getUniversityLambda = new lambda.Function(this, 'GetUniversityFunction', {
+            runtime: lambda.Runtime.PYTHON_3_13,
+            architecture: lambda.Architecture.ARM_64,
+            handler: 'get_university.handler',
+            code: lambda.Code.fromAsset('../backend/src/lambda/university'),
+            functionName: 'get-university',
+            timeout: cdk.Duration.seconds(10),
+            memorySize: 256,
+            logGroup: this.getUniversityLambdaLogGroup,
+            layers: [this.sharedLambdaLayer],
+            environment: {
+                UNIVERSITIES_TABLE_NAME: this.universitiesTable.tableName,
+            },
+        });
+
+        this.universitiesTable.grantReadData(this.getUniversityLambda);
+
+        this.upsertUniversityLambdaLogGroup = new logs.LogGroup(this, 'UpsertUniversityLogGroup', {
+            logGroupName: '/aws/lambda/upsert-university',
+            retention: logs.RetentionDays.ONE_WEEK,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+        });
+
+        this.upsertUniversityLambda = new lambda.Function(this, 'UpsertUniversityFunction', {
+            runtime: lambda.Runtime.PYTHON_3_13,
+            architecture: lambda.Architecture.ARM_64,
+            handler: 'upsert_university.handler',
+            code: lambda.Code.fromAsset('../backend/src/lambda/university'),
+            functionName: 'upsert-university',
+            timeout: cdk.Duration.seconds(10),
+            memorySize: 256,
+            logGroup: this.upsertUniversityLambdaLogGroup,
+            layers: [this.sharedLambdaLayer],
+            environment: {
+                UNIVERSITIES_TABLE_NAME: this.universitiesTable.tableName,
+            },
+        });
+
+        this.universitiesTable.grantReadWriteData(this.upsertUniversityLambda);
+
+        // Schedule Lambda Functions
+        this.getScheduleLambdaLogGroup = new logs.LogGroup(this, 'GetScheduleLogGroup', {
+            logGroupName: '/aws/lambda/get-schedule',
+            retention: logs.RetentionDays.ONE_WEEK,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+        });
+
+        this.getScheduleLambda = new lambda.Function(this, 'GetScheduleFunction', {
+            runtime: lambda.Runtime.PYTHON_3_13,
+            architecture: lambda.Architecture.ARM_64,
+            handler: 'get_schedule.handler',
+            code: lambda.Code.fromAsset('../backend/src/lambda/schedule'),
+            functionName: 'get-schedule',
+            timeout: cdk.Duration.seconds(10),
+            memorySize: 256,
+            logGroup: this.getScheduleLambdaLogGroup,
+            layers: [this.sharedLambdaLayer],
+            environment: {
+                CLASS_SCHEDULES_TABLE_NAME: this.classSchedulesTable.tableName,
+            },
+        });
+
+        this.classSchedulesTable.grantReadData(this.getScheduleLambda);
+
+        this.upsertScheduleLambdaLogGroup = new logs.LogGroup(this, 'UpsertScheduleLogGroup', {
+            logGroupName: '/aws/lambda/upsert-schedule',
+            retention: logs.RetentionDays.ONE_WEEK,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+        });
+
+        this.upsertScheduleLambda = new lambda.Function(this, 'UpsertScheduleFunction', {
+            runtime: lambda.Runtime.PYTHON_3_13,
+            architecture: lambda.Architecture.ARM_64,
+            handler: 'upsert_schedule.handler',
+            code: lambda.Code.fromAsset('../backend/src/lambda/schedule'),
+            functionName: 'upsert-schedule',
+            timeout: cdk.Duration.seconds(10),
+            memorySize: 256,
+            logGroup: this.upsertScheduleLambdaLogGroup,
+            layers: [this.sharedLambdaLayer],
+            environment: {
+                CLASS_SCHEDULES_TABLE_NAME: this.classSchedulesTable.tableName,
+            },
+        });
+
+        this.classSchedulesTable.grantReadWriteData(this.upsertScheduleLambda);
 
         this.registerStudentFaceLambdaLogGroup = new logs.LogGroup(this, 'RegisterStudentFaceLogGroup', {
             logGroupName: '/aws/lambda/register-student-face',
@@ -593,6 +769,79 @@ export class SmartAttendanceTrackerStack extends Stack {
             apiKeyRequired: true,
         });
 
+        // University API Routes
+        // Define CORS configuration for university endpoints
+        const universityCorsOptions: apigateway.CorsOptions = {
+            allowOrigins: ['http://localhost:5173', 'http://localhost:4173'],
+            allowMethods: ['GET', 'POST', 'OPTIONS'],
+            allowHeaders: ['Content-Type', 'Authorization', 'X-Api-Key'],
+            allowCredentials: true,
+            maxAge: cdk.Duration.hours(1),
+        };
+
+        // Create Lambda integrations for university endpoints
+        const getUniversityIntegration = new apigateway.LambdaIntegration(this.getUniversityLambda, {
+            proxy: true,
+            allowTestInvoke: true,
+        });
+
+        const upsertUniversityIntegration = new apigateway.LambdaIntegration(this.upsertUniversityLambda, {
+            proxy: true,
+            allowTestInvoke: true,
+        });
+
+        // Create /v1/universities resource
+        const universitiesResource = v1Resource.addResource('universities');
+        const universityCodeResource = universitiesResource.addResource('{university_code}', {
+            defaultCorsPreflightOptions: universityCorsOptions,
+        });
+
+        // Add GET /v1/universities/{university_code}
+        universityCodeResource.addMethod('GET', getUniversityIntegration, {
+            authorizer: authorizer,
+            authorizationType: apigateway.AuthorizationType.COGNITO,
+            apiKeyRequired: true,
+        });
+
+        // Add POST /v1/universities/{university_code}
+        universityCodeResource.addMethod('POST', upsertUniversityIntegration, {
+            authorizer: authorizer,
+            authorizationType: apigateway.AuthorizationType.COGNITO,
+            apiKeyRequired: true,
+        });
+
+        // Schedule API Routes
+        // Create Lambda integrations for schedule endpoints
+        const getScheduleIntegration = new apigateway.LambdaIntegration(this.getScheduleLambda, {
+            proxy: true,
+            allowTestInvoke: true,
+        });
+
+        const upsertScheduleIntegration = new apigateway.LambdaIntegration(this.upsertScheduleLambda, {
+            proxy: true,
+            allowTestInvoke: true,
+        });
+
+        // Create /v1/universities/{university_code}/schedules resource
+        const schedulesResource = universityCodeResource.addResource('schedules');
+        const scheduleIdResource = schedulesResource.addResource('{schedule_id}', {
+            defaultCorsPreflightOptions: universityCorsOptions,
+        });
+
+        // Add GET /v1/universities/{university_code}/schedules/{schedule_id}
+        scheduleIdResource.addMethod('GET', getScheduleIntegration, {
+            authorizer: authorizer,
+            authorizationType: apigateway.AuthorizationType.COGNITO,
+            apiKeyRequired: true,
+        });
+
+        // Add POST /v1/universities/{university_code}/schedules/{schedule_id}
+        scheduleIdResource.addMethod('POST', upsertScheduleIntegration, {
+            authorizer: authorizer,
+            authorizationType: apigateway.AuthorizationType.COGNITO,
+            apiKeyRequired: true,
+        });
+
         // Create API Key for rate limiting
         this.apiKey = new apigateway.ApiKey(this, 'SmartAttendanceApiKey', {
             apiKeyName: 'smart-attendance-api-key',
@@ -717,6 +966,30 @@ export class SmartAttendanceTrackerStack extends Stack {
             value: this.studentAttendanceTable.tableArn,
             description: 'DynamoDB Student Attendance Table ARN',
             exportName: 'SmartAttendanceStudentAttendanceTableArn',
+        });
+
+        new cdk.CfnOutput(this, 'ClassSchedulesTableName', {
+            value: this.classSchedulesTable.tableName,
+            description: 'DynamoDB Class Schedules Table Name',
+            exportName: 'SmartAttendanceClassSchedulesTableName',
+        });
+
+        new cdk.CfnOutput(this, 'ClassSchedulesTableArn', {
+            value: this.classSchedulesTable.tableArn,
+            description: 'DynamoDB Class Schedules Table ARN',
+            exportName: 'SmartAttendanceClassSchedulesTableArn',
+        });
+
+        new cdk.CfnOutput(this, 'UniversitiesTableName', {
+            value: this.universitiesTable.tableName,
+            description: 'DynamoDB Universities Table Name',
+            exportName: 'SmartAttendanceUniversitiesTableName',
+        });
+
+        new cdk.CfnOutput(this, 'UniversitiesTableArn', {
+            value: this.universitiesTable.tableArn,
+            description: 'DynamoDB Universities Table ARN',
+            exportName: 'SmartAttendanceUniversitiesTableArn',
         });
 
         new cdk.CfnOutput(this, 'FaceComparisonQueueUrl', {

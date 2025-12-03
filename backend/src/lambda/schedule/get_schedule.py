@@ -6,42 +6,61 @@ from typing import Any, Dict
 import boto3
 from botocore.exceptions import ClientError
 
-from student.shared.model.StudentModel import StudentModel
+from schedule.shared.model.ScheduleModel import ScheduleModel
 
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # Environment variables
-STUDENTS_TABLE_NAME = os.environ.get('STUDENTS_TABLE_NAME')
+CLASS_SCHEDULES_TABLE_NAME = os.environ.get('CLASS_SCHEDULES_TABLE_NAME')
 
 # Initialize DynamoDB resource
 dynamodb = boto3.resource('dynamodb')
-students_table = dynamodb.Table(STUDENTS_TABLE_NAME)
+schedules_table = dynamodb.Table(CLASS_SCHEDULES_TABLE_NAME)
 
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
-    Lambda handler to get student profile information.
+    Lambda handler to get class schedule information by schedule ID.
 
     Args:
-        event: API Gateway event containing request context with Cognito authorizer claims
+        event: API Gateway event containing path parameters and request context
         context: Lambda context object
 
     Returns:
-        API Gateway response with student profile data
+        API Gateway response with schedule data
     """
     try:
-        # Extract user_id from Cognito authorizer claims
-        user_id = event['requestContext']['authorizer']['claims']['sub']
-        logger.info(f"Fetching profile for user_id: {user_id}")
+        # Extract path parameters
+        university_code = event['pathParameters']['university_code']
+        schedule_id = event['pathParameters']['schedule_id']
+        logger.info(f"Fetching schedule with ID: {schedule_id} for university: {university_code}")
 
-        # Query DynamoDB for student record
-        response = students_table.get_item(Key={'user_id': user_id})
+        # Validate that schedule_id starts with university_code
+        expected_prefix = f"{university_code.upper()}_"
+        if not schedule_id.upper().startswith(expected_prefix):
+            logger.warning(f"Schedule ID {schedule_id} does not match university code {university_code}")
+            return {
+                'statusCode': 400,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Credentials': 'true',
+                },
+                'body': json.dumps({
+                    'message': f'Schedule ID must start with {expected_prefix}'
+                })
+            }
 
-        # Check if a student exists
+        # Query DynamoDB by schedule_id (partition key)
+        response = schedules_table.get_item(
+            Key={'schedule_id': schedule_id.upper()}
+        )
+
+        # Check if schedule exists
         if 'Item' not in response:
-            logger.warning(f"Student profile not found for user_id: {user_id}")
+            logger.warning(f"Schedule not found for ID: {schedule_id}")
             return {
                 'statusCode': 404,
                 'headers': {
@@ -50,26 +69,18 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     'Access-Control-Allow-Credentials': 'true',
                 },
                 'body': json.dumps({
-                    'message': 'Student profile not found'
+                    'message': f'Schedule with ID {schedule_id} not found'
                 })
             }
 
-        # Parse DynamoDB item to StudentModel
-        student_item = response['Item']
-        student = StudentModel.from_dynamodb_item(student_item)
+        # Parse DynamoDB item to ScheduleModel
+        schedule_item = response['Item']
+        schedule = ScheduleModel.from_dynamodb_item(schedule_item)
 
-        # Prepare sanitized response (exclude internal fields)
-        profile_data = {
-            'student_id': student.student_id,
-            'first_name': student.first_name,
-            'last_name': student.last_name,
-            'email': student.email,
-            'phone_number': student.phone_number,
-            'face_registered': student.face_registered,
-            'face_registered_at': student.face_registered_at.isoformat() if student.face_registered_at else None,
-        }
+        # Prepare response data
+        schedule_data = schedule.to_dict()
 
-        logger.info(f"Successfully retrieved profile for user_id: {user_id}")
+        logger.info(f"Successfully retrieved schedule: {schedule_id}")
 
         return {
             'statusCode': 200,
@@ -78,7 +89,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 'Access-Control-Allow-Origin': '*',
                 'Access-Control-Allow-Credentials': 'true',
             },
-            'body': json.dumps(profile_data)
+            'body': json.dumps(schedule_data)
         }
 
     except KeyError as e:
@@ -91,7 +102,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 'Access-Control-Allow-Credentials': 'true',
             },
             'body': json.dumps({
-                'message': 'Invalid request: missing authorization claims'
+                'message': 'Invalid request: missing required path parameters'
             })
         }
 
@@ -105,7 +116,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 'Access-Control-Allow-Credentials': 'true',
             },
             'body': json.dumps({
-                'message': 'Internal server error while fetching profile'
+                'message': 'Internal server error while fetching schedule'
             })
         }
 
