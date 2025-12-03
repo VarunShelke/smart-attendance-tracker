@@ -1,7 +1,8 @@
 import type {ReactNode} from 'react';
 import React, {useCallback, useEffect, useState} from 'react';
-import {fetchUserAttributes, getCurrentUser, signOut as amplifySignOut} from 'aws-amplify/auth';
+import {fetchUserAttributes, getCurrentUser, signOut as amplifySignOut, fetchAuthSession} from 'aws-amplify/auth';
 import type {User} from '../types/auth';
+import {UserRole} from '../types/auth';
 import {AuthContext, type AuthContextType} from './AuthContext';
 
 interface AuthProviderProps {
@@ -23,11 +24,27 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({children}) => {
             // Then fetch attributes - this may fail if session is incomplete
             const attributes = await fetchUserAttributes();
 
+            // Fetch auth session to get ID token with groups
+            const session = await fetchAuthSession();
+            const idToken = session.tokens?.idToken;
+
+            // Extract groups from ID token payload
+            let groups: string[] = [];
+            if (idToken?.payload?.['cognito:groups']) {
+                const cognitoGroups = idToken.payload['cognito:groups'];
+                if (Array.isArray(cognitoGroups)) {
+                    groups = cognitoGroups as string[];
+                } else if (typeof cognitoGroups === 'string') {
+                    groups = [cognitoGroups];
+                }
+            }
+
             setUser({
                 userId: currentUser.userId,
                 email: attributes.email || '',
                 firstName: attributes.given_name,
                 lastName: attributes.family_name,
+                groups,
             });
         } catch (error) {
             // Handle different error scenarios
@@ -77,12 +94,32 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({children}) => {
         }
     }, []);
 
+    // Role helper functions
+    const getUserRoles = useCallback((): UserRole[] => {
+        if (!user?.groups) return [];
+        return user.groups.filter(group =>
+            Object.values(UserRole).includes(group as UserRole)
+        ) as UserRole[];
+    }, [user]);
+
+    const hasRole = useCallback((role: UserRole): boolean => {
+        return getUserRoles().includes(role);
+    }, [getUserRoles]);
+
+    const hasAnyRole = useCallback((roles: UserRole[]): boolean => {
+        const userRoles = getUserRoles();
+        return roles.some(role => userRoles.includes(role));
+    }, [getUserRoles]);
+
     const value: AuthContextType = {
         user,
         isLoading,
         isAuthenticated: user !== null,
         refreshUser,
         signOut,
+        hasRole,
+        hasAnyRole,
+        getUserRoles,
     };
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

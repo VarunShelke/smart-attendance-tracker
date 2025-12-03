@@ -6,42 +6,48 @@ from typing import Any, Dict
 import boto3
 from botocore.exceptions import ClientError
 
-from student.shared.model.StudentModel import StudentModel
+from university.shared.model.UniversityModel import UniversityModel
 
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # Environment variables
-STUDENTS_TABLE_NAME = os.environ.get('STUDENTS_TABLE_NAME')
+UNIVERSITIES_TABLE_NAME = os.environ.get('UNIVERSITIES_TABLE_NAME')
 
 # Initialize DynamoDB resource
 dynamodb = boto3.resource('dynamodb')
-students_table = dynamodb.Table(STUDENTS_TABLE_NAME)
+universities_table = dynamodb.Table(UNIVERSITIES_TABLE_NAME)
 
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
-    Lambda handler to get student profile information.
+    Lambda handler to get university information by university code.
 
     Args:
-        event: API Gateway event containing request context with Cognito authorizer claims
+        event: API Gateway event containing path parameters and request context
         context: Lambda context object
 
     Returns:
-        API Gateway response with student profile data
+        API Gateway response with university data
     """
     try:
-        # Extract user_id from Cognito authorizer claims
-        user_id = event['requestContext']['authorizer']['claims']['sub']
-        logger.info(f"Fetching profile for user_id: {user_id}")
+        # Extract university_code from path parameters
+        university_code = event['pathParameters']['university_code']
+        logger.info(f"Fetching university with code: {university_code}")
 
-        # Query DynamoDB for student record
-        response = students_table.get_item(Key={'user_id': user_id})
+        # Query DynamoDB using GSI (university-code-index)
+        response = universities_table.query(
+            IndexName='university-code-index',
+            KeyConditionExpression='university_code = :code',
+            ExpressionAttributeValues={
+                ':code': university_code.upper()
+            }
+        )
 
-        # Check if a student exists
-        if 'Item' not in response:
-            logger.warning(f"Student profile not found for user_id: {user_id}")
+        # Check if university exists
+        if not response.get('Items') or len(response['Items']) == 0:
+            logger.warning(f"University not found for code: {university_code}")
             return {
                 'statusCode': 404,
                 'headers': {
@@ -50,26 +56,18 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     'Access-Control-Allow-Credentials': 'true',
                 },
                 'body': json.dumps({
-                    'message': 'Student profile not found'
+                    'message': f'University with code {university_code} not found'
                 })
             }
 
-        # Parse DynamoDB item to StudentModel
-        student_item = response['Item']
-        student = StudentModel.from_dynamodb_item(student_item)
+        # Parse DynamoDB item to UniversityModel
+        university_item = response['Items'][0]
+        university = UniversityModel.from_dynamodb_item(university_item)
 
-        # Prepare sanitized response (exclude internal fields)
-        profile_data = {
-            'student_id': student.student_id,
-            'first_name': student.first_name,
-            'last_name': student.last_name,
-            'email': student.email,
-            'phone_number': student.phone_number,
-            'face_registered': student.face_registered,
-            'face_registered_at': student.face_registered_at.isoformat() if student.face_registered_at else None,
-        }
+        # Prepare response data
+        university_data = university.to_dict()
 
-        logger.info(f"Successfully retrieved profile for user_id: {user_id}")
+        logger.info(f"Successfully retrieved university: {university_code}")
 
         return {
             'statusCode': 200,
@@ -78,7 +76,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 'Access-Control-Allow-Origin': '*',
                 'Access-Control-Allow-Credentials': 'true',
             },
-            'body': json.dumps(profile_data)
+            'body': json.dumps(university_data)
         }
 
     except KeyError as e:
@@ -91,7 +89,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 'Access-Control-Allow-Credentials': 'true',
             },
             'body': json.dumps({
-                'message': 'Invalid request: missing authorization claims'
+                'message': 'Invalid request: missing university_code in path'
             })
         }
 
@@ -105,7 +103,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 'Access-Control-Allow-Credentials': 'true',
             },
             'body': json.dumps({
-                'message': 'Internal server error while fetching profile'
+                'message': 'Internal server error while fetching university'
             })
         }
 

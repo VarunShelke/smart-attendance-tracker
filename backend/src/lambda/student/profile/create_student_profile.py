@@ -2,6 +2,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Dict
 
+import boto3
 from botocore.exceptions import ClientError
 
 from student.shared.model.StudentModel import StudentModel
@@ -15,11 +16,15 @@ students_table = dynamodb.Table(table_name)
 # SNS topic ARN for attendance notifications
 SNS_TOPIC_ARN = os.environ.get('SNS_TOPIC_ARN')
 
+# Cognito client for group assignment
+cognito_client = boto3.client('cognito-idp')
+
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     try:
         user_attributes = event.get('request', {}).get('userAttributes', {})
         trigger_source = event.get('triggerSource', '')
+        user_pool_id = event.get('userPoolId')  # Extract from Cognito event
 
         if trigger_source != 'PostConfirmation_ConfirmSignUp':
             print(f"Skipping non-signup trigger: {trigger_source}")
@@ -67,6 +72,21 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         )
         students_table.put_item(Item=student.to_dynamodb_item())
         print(f"Successfully created student record for user_id: {user_id}, email: {email}")
+
+        # Assign user to Student group in Cognito
+        if user_pool_id:
+            try:
+                cognito_client.admin_add_user_to_group(
+                    UserPoolId=user_pool_id,
+                    Username=user_id,
+                    GroupName='Student'
+                )
+                print(f"Successfully added user {user_id} to Student group")
+            except Exception as e:
+                print(f"Failed to add user to Student group: {str(e)}")
+                # Continue even if group assignment fails
+        else:
+            print("UserPoolId not found in event, skipping group assignment")
 
     except ClientError as e:
         error_code = e.response['Error']['Code']

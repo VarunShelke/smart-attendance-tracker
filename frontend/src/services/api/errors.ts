@@ -21,3 +21,26 @@ export class ApiError extends Error {
         this.details = details;
     }
 }
+
+/**
+ * Handle API response and extract JSON data
+ * Throws ApiError if response is not ok
+ */
+export async function handleApiResponse<T>(response: Response): Promise<T> {
+    if (!response.ok) {
+        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        let errorDetails: unknown = undefined;
+
+        try {
+            const errorData = await response.json();
+            errorMessage = errorData.message || errorMessage;
+            errorDetails = errorData;
+        } catch {
+            // If response is not JSON, use status text
+        }
+
+        throw new ApiError(errorMessage, response.status, errorDetails);
+    }
+
+    return response.json();
+}
