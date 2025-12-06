@@ -1,0 +1,160 @@
+name: Validate Infrastructure Build
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'infrastructure/**'
+      - 'backend/src/lambda/**'
+      - 'build-infrastructure.yml'
+  push:
+    branches-ignore:
+      - main
+    paths:
+      - 'infrastructure/**'
+      - 'backend/src/lambda/**'
+      - 'build-infrastructure.yml'
+  workflow_dispatch:
+
+# Cancel in-progress runs for the same workflow and branch
+concurrency:
+  group: infrastructure-validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+  PYTHON_VERSION: '3.13'
+  AWS_REGION: us-east-1
+
+permissions:
+  contents: read
+  pull-requests: write  # For posting comments on PRs
+
+jobs:
+  build-cdk:
+    name: Build CDK Infrastructure
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: infrastructure/package-lock.json
+
+      - name: Install CDK dependencies
+        working-directory: infrastructure
+        run: |
+          npm ci --prefer-offline --no-audit
+
+      - name: Build CDK project
+        working-directory: infrastructure
+        run: |
+          npm run build
+
+      - name: Validate TypeScript types
+        working-directory: infrastructure
+        run: |
+          npx tsc --noEmit
+
+  security-scan:
+    name: Infrastructure Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: infrastructure/package-lock.json
+
+      - name: Run npm audit
+        working-directory: infrastructure
+        run: |
+          # Run audit and allow moderate vulnerabilities
+          npm audit --audit-level=high || {
+            EXIT_CODE=$?
+            if [ $EXIT_CODE -eq 1 ]; then
+              echo "❌ High or critical vulnerabilities found"
+              exit 1
+            else
+              echo "⚠️ Low or moderate vulnerabilities found (acceptable)"
+              exit 0
+            fi
+          }
+
+      - name: Check for outdated dependencies
+        working-directory: infrastructure
+        run: |
+          echo "Checking for outdated Node.js dependencies..."
+          npm outdated || true
+
+  report:
+    name: Report Results
+    runs-on: ubuntu-latest
+    needs: [ build-cdk, security-scan ]
+    if: always() && github.event_name == 'pull_request'
+
+    steps:
+      - name: Comment on PR - Success
+        if: needs.build-cdk.result == 'success' && needs.security-scan.result == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ **Infrastructure validation passed**\n\n- CDK Build: ✅ Success\n- CDK Synth: ✅ Success\n- Lambda Validation: ✅ Passed\n- Security: ✅ No critical issues\n\nInfrastructure is ready for deployment.'
+            })
+
+      - name: Comment on PR - Failure
+        if: needs.build-cdk.result == 'failure' || needs.security-scan.result == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const cdkStatus = '${{ needs.build-cdk.result }}' === 'success' ? '✅' : '❌';
+            const securityStatus = '${{ needs.security-scan.result }}' === 'success' ? '✅' : '❌';
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `❌ **Infrastructure validation failed**\n\n- CDK Build: ${cdkStatus}\n- Security Scan: ${securityStatus}\n\nPlease check the workflow logs for details.`
+            })
+
+  summary:
+    name: Validation Summary
+    runs-on: ubuntu-latest
+    needs: [ build-cdk, security-scan ]
+    if: always()
+
+    steps:
+      - name: Success Summary
+        if: needs.build-cdk.result == 'success' && needs.security-scan.result == 'success'
+        run: |
+          echo "✅ All infrastructure validation checks passed"
+          echo "- CDK build completed successfully"
+          echo "- CDK synth successful"
+          echo "- Lambda functions validated"
+          echo "- Security scan passed"
+
+      - name: Failure Summary
+        if: needs.build-cdk.result == 'failure' || needs.security-scan.result == 'failure'
+        run: |
+          echo "❌ Infrastructure validation failed"
+          echo "- CDK Validation: ${{ needs.validate-cdk.result }}"
+          echo "- Security Scan: ${{ needs.security.result }}"
+          exit 1

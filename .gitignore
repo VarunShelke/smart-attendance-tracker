@@ -137,3 +137,10 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+.idea
+/backend/.venv/
+/frontend/.claude
+/backend/cdk.context.json
+/credentials.txt
+/infrastructure/cdk.out/
+/.claude/
