@@ -2,6 +2,7 @@ import {BrowserRouter as Router, Navigate, Route, Routes} from 'react-router-dom
 import SignupPage from './pages/SignupPage';
 import LoginPage from './pages/LoginPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
+import CompleteSignInPage from './pages/CompleteSignInPage';
 import FaceRegistrationPage from './pages/FaceRegistrationPage';
 import DashboardPage from './pages/DashboardPage';
 import ProfilePage from './pages/ProfilePage';
@@ -28,6 +29,7 @@ function App() {
                     <Route path="/login" element={<LoginPage/>}/>
                     <Route path="/signup" element={<SignupPage/>}/>
                     <Route path="/verify-email" element={<VerifyEmailPage/>}/>
+                    <Route path="/complete-signin" element={<CompleteSignInPage/>}/>
                     <Route path="/face-registration" element={<FaceRegistrationPage/>}/>
 
                     {/* Student routes */}

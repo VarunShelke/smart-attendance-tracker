@@ -100,12 +100,24 @@ export const useLoginForm = (): UseLoginFormReturn => {
                 return;
             }
 
+            if (nextStep.signInStep === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED') {
+                // Admin-created user needs to set new password and provide missing attributes
+                navigate('/complete-signin', {
+                    state: {
+                        email: formData.email,
+                        challengeType: nextStep.signInStep,
+                        missingAttributes: nextStep.missingAttributes || [],
+                    },
+                });
+                return;
+            }
+
             if (nextStep.signInStep === 'DONE' && isSignedIn) {
                 // Refresh user data in context
                 await refreshUser();
 
-                // Redirect to dashboard
-                navigate('/dashboard');
+                // Redirect to landing page for role-based redirect
+                navigate('/');
             }
         } catch (error) {
             const cognitoError = error as CognitoError;

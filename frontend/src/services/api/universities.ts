@@ -29,6 +29,41 @@ export interface UpsertUniversityRequest {
     timezone?: string;
 }
 
+export interface UniversitiesListResponse {
+    universities: University[];
+    count: number;
+    last_evaluated_key: string | null;
+    has_more: boolean;
+}
+
+export interface ListUniversitiesParams {
+    page_size?: number;
+    last_key?: string;
+}
+
+/**
+ * List all universities with pagination support
+ */
+export async function listUniversities(params?: ListUniversitiesParams): Promise<UniversitiesListResponse> {
+    const queryParams = new URLSearchParams();
+
+    if (params?.page_size) {
+        queryParams.set('page_size', params.page_size.toString());
+    }
+
+    if (params?.last_key) {
+        queryParams.set('last_key', params.last_key);
+    }
+
+    const endpoint = `/v1/universities${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
+
+    const response = await authenticatedFetch(endpoint, {
+        method: 'GET',
+    });
+
+    return handleApiResponse(response);
+}
+
 /**
  * Get university by code
  */
