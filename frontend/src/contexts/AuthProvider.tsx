@@ -28,24 +28,39 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({children}) => {
             const session = await fetchAuthSession();
             const idToken = session.tokens?.idToken;
 
+            console.log('[AuthProvider] Fetched auth session');
+            console.log('[AuthProvider] ID Token exists:', !!idToken);
+            console.log('[AuthProvider] ID Token payload:', idToken?.payload);
+
             // Extract groups from ID token payload
             let groups: string[] = [];
             if (idToken?.payload?.['cognito:groups']) {
                 const cognitoGroups = idToken.payload['cognito:groups'];
+                console.log('[AuthProvider] cognito:groups claim:', cognitoGroups);
+                console.log('[AuthProvider] cognito:groups type:', typeof cognitoGroups);
+
                 if (Array.isArray(cognitoGroups)) {
                     groups = cognitoGroups as string[];
+                    console.log('[AuthProvider] ✓ Extracted groups as array:', groups);
                 } else if (typeof cognitoGroups === 'string') {
                     groups = [cognitoGroups];
+                    console.log('[AuthProvider] ✓ Extracted groups as single string:', groups);
                 }
+            } else {
+                console.warn('[AuthProvider] ⚠ No cognito:groups claim found in ID token');
+                console.warn('[AuthProvider] Available claims:', Object.keys(idToken?.payload || {}));
             }
 
-            setUser({
+            const newUser = {
                 userId: currentUser.userId,
                 email: attributes.email || '',
                 firstName: attributes.given_name,
                 lastName: attributes.family_name,
                 groups,
-            });
+            };
+
+            console.log('[AuthProvider] Setting user state:', newUser);
+            setUser(newUser);
         } catch (error) {
             // Handle different error scenarios
             const err = error as {name?: string; message?: string};

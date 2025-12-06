@@ -45,7 +45,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             }
         )
 
-        # Check if university exists
+        # Check if a university exists
         if not response.get('Items') or len(response['Items']) == 0:
             logger.warning(f"University not found for code: {university_code}")
             return {

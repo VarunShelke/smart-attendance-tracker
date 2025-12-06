@@ -64,6 +64,32 @@ export const UserRole = {
 
 export type UserRole = typeof UserRole[keyof typeof UserRole];
 
+export interface NewPasswordFormData {
+    newPassword: string;
+    confirmPassword: string;
+    givenName: string;
+    familyName: string;
+}
+
+export interface NewPasswordFormErrors {
+    newPassword?: string;
+    confirmPassword?: string;
+    givenName?: string;
+    familyName?: string;
+    general?: string;
+}
+
+export interface SignInChallengeState {
+    challengeType: 'NEW_PASSWORD_REQUIRED' | 'MFA_CODE' | null;
+    missingAttributes?: string[];
+}
+
+export interface CompleteSignInState {
+    email: string;
+    challengeType: string;
+    missingAttributes?: string[];
+}
+
 export interface FaceRegistrationState {
     isCapturing: boolean;
     isUploading: boolean;

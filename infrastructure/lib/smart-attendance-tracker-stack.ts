@@ -41,6 +41,8 @@ export class SmartAttendanceTrackerStack extends Stack {
     public readonly compareStudentFaceLambdaLogGroup: logs.LogGroup;
     public readonly getUniversityLambda: lambda.Function;
     public readonly getUniversityLambdaLogGroup: logs.LogGroup;
+    public readonly listUniversitiesLambda: lambda.Function;
+    public readonly listUniversitiesLambdaLogGroup: logs.LogGroup;
     public readonly upsertUniversityLambda: lambda.Function;
     public readonly upsertUniversityLambdaLogGroup: logs.LogGroup;
     public readonly getScheduleLambda: lambda.Function;
@@ -497,6 +499,29 @@ export class SmartAttendanceTrackerStack extends Stack {
 
         this.universitiesTable.grantReadData(this.getUniversityLambda);
 
+        this.listUniversitiesLambdaLogGroup = new logs.LogGroup(this, 'ListUniversitiesLogGroup', {
+            logGroupName: '/aws/lambda/list-universities',
+            retention: logs.RetentionDays.ONE_WEEK,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+        });
+
+        this.listUniversitiesLambda = new lambda.Function(this, 'ListUniversitiesFunction', {
+            runtime: lambda.Runtime.PYTHON_3_13,
+            architecture: lambda.Architecture.ARM_64,
+            handler: 'list_universities.handler',
+            code: lambda.Code.fromAsset('../backend/src/lambda/university'),
+            functionName: 'list-universities',
+            timeout: cdk.Duration.seconds(10),
+            memorySize: 256,
+            logGroup: this.listUniversitiesLambdaLogGroup,
+            layers: [this.sharedLambdaLayer],
+            environment: {
+                UNIVERSITIES_TABLE_NAME: this.universitiesTable.tableName,
+            },
+        });
+
+        this.universitiesTable.grantReadData(this.listUniversitiesLambda);
+
         this.upsertUniversityLambdaLogGroup = new logs.LogGroup(this, 'UpsertUniversityLogGroup', {
             logGroupName: '/aws/lambda/upsert-university',
             retention: logs.RetentionDays.ONE_WEEK,
@@ -790,8 +815,23 @@ export class SmartAttendanceTrackerStack extends Stack {
             allowTestInvoke: true,
         });
 
+        const listUniversitiesIntegration = new apigateway.LambdaIntegration(this.listUniversitiesLambda, {
+            proxy: true,
+            allowTestInvoke: true,
+        });
+
         // Create /v1/universities resource
-        const universitiesResource = v1Resource.addResource('universities');
+        const universitiesResource = v1Resource.addResource('universities', {
+            defaultCorsPreflightOptions: universityCorsOptions,
+        });
+
+        // Add GET /v1/universities (list all universities)
+        universitiesResource.addMethod('GET', listUniversitiesIntegration, {
+            authorizer: authorizer,
+            authorizationType: apigateway.AuthorizationType.COGNITO,
+            apiKeyRequired: true,
+        });
+
         const universityCodeResource = universitiesResource.addResource('{university_code}', {
             defaultCorsPreflightOptions: universityCorsOptions,
         });
