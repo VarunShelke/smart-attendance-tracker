@@ -65,7 +65,9 @@ def create_processing_attendance_record(
         table_name: str,
         user_id: str,
         tracking_id: str,
-        face_s3_key: str
+        face_s3_key: str,
+        course_id: Optional[str] = None,
+        schedule_id: Optional[str] = None
 ) -> AttendanceModel:
     now = datetime.now()
 
@@ -75,6 +77,8 @@ def create_processing_attendance_record(
         attendance_date=now,
         tracking_id=tracking_id,
         face_s3_key=face_s3_key,
+        course_id=course_id,
+        schedule_id=schedule_id,
         status=AttendanceStatus.PROCESSING,
         created_at=now
     )
@@ -96,7 +100,9 @@ def send_to_comparison_queue(
     user_id: str,
     tracking_id: str,
     face_s3_key: str,
-    attendance_date: str
+    attendance_date: str,
+    course_id: Optional[str] = None,
+    schedule_id: Optional[str] = None
 ) -> None:
     """
     Send a message to SQS queue for face comparison processing.
@@ -107,6 +113,8 @@ def send_to_comparison_queue(
         tracking_id: Unique tracking ID
         face_s3_key: S3 key of the uploaded face image
         attendance_date: Attendance date in ISO format
+        course_id: Course ID (optional)
+        schedule_id: Schedule ID (optional)
 
     Raises:
         Exception: If SQS send fails
@@ -117,7 +125,9 @@ def send_to_comparison_queue(
         'tracking_id': tracking_id,
         'user_id': user_id,
         'face_s3_key': face_s3_key,
-        'attendance_date': attendance_date
+        'attendance_date': attendance_date,
+        'course_id': course_id,
+        'schedule_id': schedule_id
     }
 
     try:

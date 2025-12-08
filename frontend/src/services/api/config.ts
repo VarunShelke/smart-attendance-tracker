@@ -34,6 +34,7 @@ export const API_ROUTES = {
             FACE: '/v1/students/me/face',
             PROFILE: '/v1/students/me/profile',
             ATTENDANCE: '/v1/students/me/attendance',
+            COURSES: '/v1/students/me/courses',
         },
     },
 

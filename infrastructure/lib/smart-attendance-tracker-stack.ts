@@ -23,6 +23,7 @@ export class SmartAttendanceTrackerStack extends Stack {
     public readonly studentAttendanceTable: dynamodb.Table;
     public readonly classSchedulesTable: dynamodb.Table;
     public readonly universitiesTable: dynamodb.Table;
+    public readonly studentCoursesTable: dynamodb.Table;
     public readonly faceComparisonQueue: sqs.Queue;
     public readonly faceComparisonDLQ: sqs.Queue;
     public readonly attendanceNotificationTopic: sns.Topic;
@@ -35,6 +36,8 @@ export class SmartAttendanceTrackerStack extends Stack {
     public readonly getStudentProfileLambdaLogGroup: logs.LogGroup;
     public readonly updateStudentProfileLambda: lambda.Function;
     public readonly updateStudentProfileLambdaLogGroup: logs.LogGroup;
+    public readonly getStudentCoursesLambda: lambda.Function;
+    public readonly getStudentCoursesLambdaLogGroup: logs.LogGroup;
     public readonly processAttendanceLambda: lambda.Function;
     public readonly processAttendanceLambdaLogGroup: logs.LogGroup;
     public readonly compareStudentFaceLambda: lambda.Function;
@@ -222,6 +225,32 @@ export class SmartAttendanceTrackerStack extends Stack {
         this.universitiesTable.addGlobalSecondaryIndex({
             indexName: 'university-code-index',
             partitionKey: {name: 'university_code', type: dynamodb.AttributeType.STRING},
+        });
+
+        // Create StudentCourses DynamoDB table for storing student course enrollments
+        this.studentCoursesTable = new dynamodb.Table(this, 'StudentCoursesTable', {
+            tableName: 'attendance-tracker-student-courses',
+            partitionKey: {
+                name: 'user_id',
+                type: dynamodb.AttributeType.STRING,
+            },
+            sortKey: {
+                name: 'course_id',
+                type: dynamodb.AttributeType.STRING,
+            },
+            pointInTimeRecoverySpecification: {
+                pointInTimeRecoveryEnabled: true,
+                recoveryPeriodInDays: 30
+            },
+            billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+            deletionProtection: false,
+        });
+
+        // Add GSI for schedule_id lookups
+        this.studentCoursesTable.addGlobalSecondaryIndex({
+            indexName: 'schedule-id-index',
+            partitionKey: {name: 'schedule_id', type: dynamodb.AttributeType.STRING},
         });
 
         // Create Dead Letter Queue for failed face comparisons
@@ -474,6 +503,29 @@ export class SmartAttendanceTrackerStack extends Stack {
         });
 
         this.studentsTable.grantReadWriteData(this.updateStudentProfileLambda);
+
+        this.getStudentCoursesLambdaLogGroup = new logs.LogGroup(this, 'GetStudentCoursesLogGroup', {
+            logGroupName: '/aws/lambda/get-student-courses',
+            retention: logs.RetentionDays.ONE_WEEK,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+        });
+
+        this.getStudentCoursesLambda = new lambda.Function(this, 'GetStudentCoursesFunction', {
+            runtime: lambda.Runtime.PYTHON_3_13,
+            architecture: lambda.Architecture.ARM_64,
+            handler: 'get_student_courses.handler',
+            code: lambda.Code.fromAsset('../backend/src/lambda/student/courses'),
+            functionName: 'get-student-courses',
+            timeout: cdk.Duration.seconds(10),
+            memorySize: 256,
+            logGroup: this.getStudentCoursesLambdaLogGroup,
+            layers: [this.sharedLambdaLayer],
+            environment: {
+                STUDENT_COURSES_TABLE_NAME: this.studentCoursesTable.tableName,
+            },
+        });
+
+        this.studentCoursesTable.grantReadData(this.getStudentCoursesLambda);
 
         // University Lambda Functions
         this.getUniversityLambdaLogGroup = new logs.LogGroup(this, 'GetUniversityLogGroup', {
@@ -789,6 +841,24 @@ export class SmartAttendanceTrackerStack extends Stack {
 
         // Add POST method to /v1/students/me endpoint for updating profile
         meResource.addMethod('POST', updateStudentProfileIntegration, {
+            authorizer: authorizer,
+            authorizationType: apigateway.AuthorizationType.COGNITO,
+            apiKeyRequired: true,
+        });
+
+        // Create Lambda integration for get_student_courses
+        const getStudentCoursesIntegration = new apigateway.LambdaIntegration(this.getStudentCoursesLambda, {
+            proxy: true,
+            allowTestInvoke: true,
+        });
+
+        // Add /v1/students/me/courses endpoint
+        const coursesResource = meResource.addResource('courses', {
+            defaultCorsPreflightOptions: corsOptions,
+        });
+
+        // Add GET method for fetching student courses
+        coursesResource.addMethod('GET', getStudentCoursesIntegration, {
             authorizer: authorizer,
             authorizationType: apigateway.AuthorizationType.COGNITO,
             apiKeyRequired: true,
@@ -1120,6 +1190,30 @@ export class SmartAttendanceTrackerStack extends Stack {
             value: this.updateStudentProfileLambda.functionName,
             description: 'Lambda Function Name for Update Student Profile',
             exportName: 'SmartAttendanceUpdateStudentProfileLambdaName',
+        });
+
+        new cdk.CfnOutput(this, 'StudentCoursesTableName', {
+            value: this.studentCoursesTable.tableName,
+            description: 'DynamoDB Student Courses Table Name',
+            exportName: 'SmartAttendanceStudentCoursesTableName',
+        });
+
+        new cdk.CfnOutput(this, 'StudentCoursesTableArn', {
+            value: this.studentCoursesTable.tableArn,
+            description: 'DynamoDB Student Courses Table ARN',
+            exportName: 'SmartAttendanceStudentCoursesTableArn',
+        });
+
+        new cdk.CfnOutput(this, 'GetStudentCoursesLambdaArn', {
+            value: this.getStudentCoursesLambda.functionArn,
+            description: 'Lambda ARN for Get Student Courses',
+            exportName: 'SmartAttendanceGetStudentCoursesLambdaArn',
+        });
+
+        new cdk.CfnOutput(this, 'GetStudentCoursesLambdaName', {
+            value: this.getStudentCoursesLambda.functionName,
+            description: 'Lambda Function Name for Get Student Courses',
+            exportName: 'SmartAttendanceGetStudentCoursesLambdaName',
         });
     }
 }

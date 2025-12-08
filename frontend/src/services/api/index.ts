@@ -31,6 +31,8 @@ export {
     markAttendance,
     getStudentProfile,
     updateStudentProfile,
+    getStudentCourses,
     type FaceMetadata,
     type UpdateStudentProfileData,
 } from './endpoints/students';
+export type {Course} from '../../types/course';

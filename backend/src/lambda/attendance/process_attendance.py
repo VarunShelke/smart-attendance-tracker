@@ -93,6 +93,10 @@ def handler(event, context):
                 'message': 'faceImage is required'
             })
 
+        # Extract optional course context
+        course_id = body.get('course_id')
+        schedule_id = body.get('schedule_id')
+
         # Validate image size (13MB limit)
         if len(face_image) > 13 * 1024 * 1024:
             return create_response(413, {
@@ -147,7 +151,9 @@ def handler(event, context):
                 STUDENT_ATTENDANCE_TABLE_NAME,
                 user_id,
                 tracking_id,
-                face_s3_key
+                face_s3_key,
+                course_id,
+                schedule_id
             )
             logger.info(f"Created attendance record: {attendance.attendance_id}")
         except Exception as e:
@@ -164,7 +170,9 @@ def handler(event, context):
                 user_id,
                 tracking_id,
                 face_s3_key,
-                attendance.attendance_date.isoformat()
+                attendance.attendance_date.isoformat(),
+                course_id,
+                schedule_id
             )
             logger.info(f"Sent message to SQS queue for tracking_id: {tracking_id}")
         except Exception as e:
