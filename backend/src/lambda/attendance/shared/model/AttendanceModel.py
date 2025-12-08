@@ -21,6 +21,8 @@ class AttendanceModel(BaseModel):
     similarity_score: Optional[float] = None
     face_s3_key: str
     tracking_id: str
+    course_id: Optional[str] = None
+    schedule_id: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.now)
     verified_at: Optional[datetime] = None
     error_message: Optional[str] = None
@@ -70,6 +72,8 @@ class AttendanceModel(BaseModel):
             'similarity_score': self.similarity_score,
             'face_s3_key': self.face_s3_key,
             'tracking_id': self.tracking_id,
+            'course_id': self.course_id,
+            'schedule_id': self.schedule_id,
             'created_at': self.created_at.isoformat(),
             'verified_at': self.verified_at.isoformat() if self.verified_at else None,
             'error_message': self.error_message,

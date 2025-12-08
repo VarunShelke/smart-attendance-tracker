@@ -12,6 +12,7 @@ import {API_ROUTES} from '../config';
 import {ApiError} from '../errors';
 import type {AttendanceResponse} from '../../../types/attendance';
 import type {StudentProfile} from '../../../types/student';
+import type {Course} from '../../../types/course';
 
 export interface FaceMetadata {
     registered: boolean;
@@ -121,14 +122,24 @@ export async function deleteFace(): Promise<void> {
  * Mark attendance by submitting a face image for verification
  *
  * @param imageBase64 - Base64 encoded image data
+ * @param courseId - Optional course ID for course-specific attendance
+ * @param scheduleId - Optional schedule ID for course-specific attendance
  * @returns Promise with attendance response containing tracking_id
  * @throws {ApiError} If the request fails
  */
-export async function markAttendance(imageBase64: string): Promise<AttendanceResponse> {
+export async function markAttendance(
+    imageBase64: string,
+    courseId?: string,
+    scheduleId?: string
+): Promise<AttendanceResponse> {
     try {
         const response = await authenticatedFetch(API_ROUTES.STUDENTS.ME.ATTENDANCE, {
             method: 'POST',
-            body: JSON.stringify({faceImage: imageBase64}),
+            body: JSON.stringify({
+                faceImage: imageBase64,
+                ...(courseId && {course_id: courseId}),
+                ...(scheduleId && {schedule_id: scheduleId}),
+            }),
         });
 
         if (!response.ok) {
@@ -293,6 +304,55 @@ export async function updateStudentProfile(
         }
 
         console.error('Update student profile error:', error);
+        throw new ApiError(
+            'Network error. Please check your connection and try again.',
+            0
+        );
+    }
+}
+
+/**
+ * Get student's enrolled courses
+ *
+ * @returns Promise with array of courses
+ * @throws {ApiError} If the request fails
+ */
+export async function getStudentCourses(): Promise<Course[]> {
+    try {
+        const response = await authenticatedFetch(API_ROUTES.STUDENTS.ME.COURSES, {
+            method: 'GET',
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+
+            // Map specific error codes to user-friendly messages
+            if (response.status === 401) {
+                throw new ApiError('Authentication failed. Please log in again.', 401);
+            } else if (response.status === 404) {
+                throw new ApiError('No courses found for this student.', 404);
+            } else if (response.status === 429) {
+                throw new ApiError(
+                    'Too many requests. Please wait a moment and try again.',
+                    429
+                );
+            } else {
+                throw new ApiError(
+                    errorData.message || 'Failed to fetch courses. Please try again.',
+                    response.status,
+                    errorData
+                );
+            }
+        }
+
+        const data = await response.json();
+        return data.courses || [];
+    } catch (error) {
+        if (error instanceof ApiError) {
+            throw error;
+        }
+
+        console.error('Get student courses error:', error);
         throw new ApiError(
             'Network error. Please check your connection and try again.',
             0

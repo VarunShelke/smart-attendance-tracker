@@ -1,17 +1,20 @@
 import React, {useEffect} from 'react';
 import {useAttendanceCapture} from '../../hooks/useAttendanceCapture';
+import type {Course} from '../../types/course';
 import Button from '../ui/Button';
 
 interface AttendanceCaptureModalProps {
     isOpen: boolean;
     onClose: () => void;
     onSuccess: (trackingId: string) => void;
+    course?: Course;
 }
 
 const AttendanceCaptureModal: React.FC<AttendanceCaptureModalProps> = ({
                                                                              isOpen,
                                                                              onClose,
                                                                              onSuccess,
+                                                                             course,
                                                                          }) => {
     const {
         state,
@@ -58,7 +61,7 @@ const AttendanceCaptureModal: React.FC<AttendanceCaptureModalProps> = ({
                 {/* Header */}
                 <div className="flex items-center justify-between p-6 border-b border-gray-200">
                     <h2 className="text-2xl font-semibold text-gray-800">
-                        Mark Attendance
+                        {course ? `Mark Attendance - ${course.course_name}` : 'Mark Attendance'}
                     </h2>
                     <button
                         onClick={handleClose}
@@ -245,7 +248,7 @@ const AttendanceCaptureModal: React.FC<AttendanceCaptureModalProps> = ({
                             </Button>
                             <Button
                                 variant="primary"
-                                onClick={submitAttendance}
+                                onClick={() => submitAttendance(course)}
                                 isLoading={state.isLoading}
                                 className="flex-1"
                             >

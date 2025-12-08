@@ -1,5 +1,6 @@
 import {useCallback, useRef, useState} from 'react';
 import type {AttendanceCaptureState, AttendanceResponse} from '../types/attendance';
+import type {Course} from '../types/course';
 import {markAttendance, ApiError} from '../services/api';
 import {
     startCamera as startCameraUtil,
@@ -17,7 +18,7 @@ interface UseAttendanceCaptureReturn {
     stopCamera: () => void;
     capturePhoto: () => void;
     retakePhoto: () => void;
-    submitAttendance: () => Promise<void>;
+    submitAttendance: (course?: Course) => Promise<void>;
     reset: () => void;
 }
 
@@ -109,7 +110,7 @@ export const useAttendanceCapture = (): UseAttendanceCaptureReturn => {
         startCamera();
     }, [startCamera]);
 
-    const submitAttendance = useCallback(async () => {
+    const submitAttendance = useCallback(async (course?: Course) => {
         if (!state.capturedImage) {
             setState(prev => ({...prev, error: 'No photo captured', stage: 'error'}));
             return;
@@ -120,7 +121,11 @@ export const useAttendanceCapture = (): UseAttendanceCaptureReturn => {
         try {
             // Strip the data URL prefix before sending to backend
             const base64Data = stripDataUrlPrefix(state.capturedImage);
-            const response: AttendanceResponse = await markAttendance(base64Data);
+            const response: AttendanceResponse = await markAttendance(
+                base64Data,
+                course?.course_id,
+                course?.schedule_id
+            );
 
             console.log('Attendance marked successfully:', response);
 
