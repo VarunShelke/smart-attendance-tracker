@@ -1,8 +1,9 @@
 import React, {useState} from 'react';
 import {useNavigate} from 'react-router-dom';
 import {useAuth} from '../hooks/useAuth';
-import Button from '../components/ui/Button';
 import AttendanceCaptureModal from '../components/camera/AttendanceCaptureModal';
+import CoursesList from '../components/courses/CoursesList';
+import type {Course} from '../types/course';
 
 const DashboardPage: React.FC = () => {
     const navigate = useNavigate();
@@ -11,6 +12,7 @@ const DashboardPage: React.FC = () => {
     const [showUserMenu, setShowUserMenu] = useState(false);
     const [isAttendanceModalOpen, setIsAttendanceModalOpen] = useState(false);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
+    const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
 
     const handleSignOut = async () => {
         setIsSigningOut(true);
@@ -43,8 +45,19 @@ const DashboardPage: React.FC = () => {
         return 'U';
     };
 
+    const handleRegisterAttendance = (course: Course) => {
+        setSelectedCourse(course);
+        setIsAttendanceModalOpen(true);
+    };
+
+    const handleAttendanceModalClose = () => {
+        setIsAttendanceModalOpen(false);
+        setSelectedCourse(null);
+    };
+
     const handleAttendanceSuccess = (trackingId: string) => {
         setIsAttendanceModalOpen(false);
+        setSelectedCourse(null);
         setSuccessMessage(`Attendance submitted successfully! Tracking ID: ${trackingId}`);
         // Clear success message after 5 seconds
         setTimeout(() => setSuccessMessage(null), 5000);
@@ -65,60 +78,6 @@ const DashboardPage: React.FC = () => {
                         </div>
 
                         <div className="flex items-center gap-4">
-                            {/* Mark Attendance Button */}
-                            <Button
-                                variant="primary"
-                                onClick={() => setIsAttendanceModalOpen(true)}
-                                className="hidden sm:flex"
-                            >
-                                <svg
-                                    className="w-5 h-5 mr-2"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
-                                    />
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"
-                                    />
-                                </svg>
-                                Mark Attendance
-                            </Button>
-
-                            {/* Mobile Mark Attendance Button */}
-                            <button
-                                onClick={() => setIsAttendanceModalOpen(true)}
-                                className="sm:hidden p-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors"
-                            >
-                                <svg
-                                    className="w-6 h-6"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
-                                    />
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"
-                                    />
-                                </svg>
-                            </button>
-
                             {/* User Menu */}
                             <div className="relative">
                                 <button
@@ -218,74 +177,7 @@ const DashboardPage: React.FC = () => {
 
             {/* Main Content */}
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-                <div className="bg-white rounded-lg shadow p-8">
-                    <div className="text-center">
-                        <div
-                            className="mx-auto w-20 h-20 bg-primary-100 rounded-full flex items-center justify-center mb-4">
-                            <svg
-                                className="w-10 h-10 text-primary-600"
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
-                            >
-                                <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                                />
-                            </svg>
-                        </div>
-
-                        <h2 className="text-3xl font-bold text-gray-900 mb-2">
-                            Welcome, {user?.firstName || 'User'}! 👋
-                        </h2>
-                        <p className="text-gray-600 mb-6">
-                            You have successfully logged in to Smart Attendance Tracker
-                        </p>
-
-                        <div className="max-w-md mx-auto bg-gray-50 rounded-lg p-6 mb-6">
-                            <h3 className="text-lg font-semibold text-gray-900 mb-3">
-                                Your Account Info
-                            </h3>
-                            <div className="space-y-2 text-left">
-                                <div className="flex justify-between">
-                                    <span className="text-gray-600">Email:</span>
-                                    <span className="font-medium text-gray-900">{user?.email}</span>
-                                </div>
-                                {user?.firstName && (
-                                    <div className="flex justify-between">
-                                        <span className="text-gray-600">First Name:</span>
-                                        <span className="font-medium text-gray-900">{user.firstName}</span>
-                                    </div>
-                                )}
-                                {user?.lastName && (
-                                    <div className="flex justify-between">
-                                        <span className="text-gray-600">Last Name:</span>
-                                        <span className="font-medium text-gray-900">{user.lastName}</span>
-                                    </div>
-                                )}
-                                <div className="flex justify-between">
-                                    <span className="text-gray-600">User ID:</span>
-                                    <span className="font-mono text-sm text-gray-900">
-                    {user?.userId.substring(0, 8)}...
-                  </span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="text-gray-600">
-                            <p className="mb-4">Dashboard features coming soon...</p>
-                            <Button
-                                variant="outline"
-                                onClick={handleSignOut}
-                                isLoading={isSigningOut}
-                            >
-                                Sign Out
-                            </Button>
-                        </div>
-                    </div>
-                </div>
+                <CoursesList onRegisterAttendance={handleRegisterAttendance}/>
             </main>
 
             {/* Success Toast Message */}
@@ -321,8 +213,9 @@ const DashboardPage: React.FC = () => {
             {/* Attendance Capture Modal */}
             <AttendanceCaptureModal
                 isOpen={isAttendanceModalOpen}
-                onClose={() => setIsAttendanceModalOpen(false)}
+                onClose={handleAttendanceModalClose}
                 onSuccess={handleAttendanceSuccess}
+                course={selectedCourse || undefined}
             />
         </div>
     );

@@ -69,9 +69,9 @@ export const useLoginForm = (): UseLoginFormReturn => {
             try {
                 const currentUser = await getCurrentUser();
                 if (currentUser) {
-                    console.log('User already authenticated, redirecting to dashboard');
+                    console.log('User already authenticated, redirecting to role-based dashboard');
                     await refreshUser();
-                    navigate('/dashboard');
+                    window.location.href = '/';
                     return;
                 }
             } catch {
@@ -116,8 +116,9 @@ export const useLoginForm = (): UseLoginFormReturn => {
                 // Refresh user data in context
                 await refreshUser();
 
-                // Redirect to landing page for role-based redirect
-                navigate('/');
+                // Hard redirect to landing page for role-based redirect
+                // Using window.location.href ensures state is fully loaded before LandingPage renders
+                window.location.href = '/';
             }
         } catch (error) {
             const cognitoError = error as CognitoError;
@@ -153,9 +154,9 @@ export const useLoginForm = (): UseLoginFormReturn => {
                 setErrors({general: errorMessage});
             } else if (cognitoError.name === 'UserAlreadyAuthenticatedException') {
                 // User already has an active session, just refresh and redirect
-                console.log('User already authenticated, redirecting...');
+                console.log('User already authenticated, redirecting to role-based dashboard');
                 await refreshUser();
-                navigate('/dashboard');
+                window.location.href = '/';
                 return;
             } else {
                 setErrors({general: cognitoError.message || errorMessage});
