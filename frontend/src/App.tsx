@@ -11,6 +11,7 @@ import {AdminDashboardPage} from './pages/admin/AdminDashboardPage';
 import {InstructorDashboardPage} from './pages/instructor/InstructorDashboardPage';
 import {UniversitiesManagePage} from './pages/admin/UniversitiesManagePage';
 import {SchedulesManagePage} from './pages/admin/SchedulesManagePage';
+import {StudentsManagePage} from './pages/admin/StudentsManagePage';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import {RoleProtectedRoute} from './components/auth/RoleProtectedRoute';
 import {AuthProvider} from './contexts/AuthProvider';
@@ -64,6 +65,14 @@ function App() {
                         element={
                             <RoleProtectedRoute requiredRoles={[UserRole.ADMIN]}>
                                 <UniversitiesManagePage/>
+                            </RoleProtectedRoute>
+                        }
+                    />
+                    <Route
+                        path="/admin/students"
+                        element={
+                            <RoleProtectedRoute requiredRoles={[UserRole.ADMIN]}>
+                                <StudentsManagePage/>
                             </RoleProtectedRoute>
                         }
                     />
