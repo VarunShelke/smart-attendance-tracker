@@ -36,6 +36,19 @@ export interface UpsertScheduleRequest {
     semester: string;
 }
 
+export interface SchedulesListResponse {
+    schedules: Schedule[];
+    count: number;
+    last_evaluated_key: string | null;
+    has_more: boolean;
+}
+
+export interface ListSchedulesParams {
+    university_code?: string;
+    page_size?: number;
+    last_key?: string;
+}
+
 /**
  * Get schedule by ID
  */
@@ -68,6 +81,33 @@ export async function upsertSchedule(
             body: JSON.stringify(data),
         }
     );
+
+    return handleApiResponse(response);
+}
+
+/**
+ * List all schedules with pagination support
+ */
+export async function listSchedules(params?: ListSchedulesParams): Promise<SchedulesListResponse> {
+    const queryParams = new URLSearchParams();
+
+    if (params?.university_code) {
+        queryParams.set('university_code', params.university_code);
+    }
+
+    if (params?.page_size) {
+        queryParams.set('page_size', params.page_size.toString());
+    }
+
+    if (params?.last_key) {
+        queryParams.set('last_key', params.last_key);
+    }
+
+    const endpoint = `/v1/schedules${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
+
+    const response = await authenticatedFetch(endpoint, {
+        method: 'GET',
+    });
 
     return handleApiResponse(response);
 }

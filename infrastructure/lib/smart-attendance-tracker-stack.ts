@@ -52,6 +52,14 @@ export class SmartAttendanceTrackerStack extends Stack {
     public readonly getScheduleLambdaLogGroup: logs.LogGroup;
     public readonly upsertScheduleLambda: lambda.Function;
     public readonly upsertScheduleLambdaLogGroup: logs.LogGroup;
+    public readonly listStudentsLambda: lambda.Function;
+    public readonly listStudentsLambdaLogGroup: logs.LogGroup;
+    public readonly getStudentEnrollmentsLambda: lambda.Function;
+    public readonly getStudentEnrollmentsLambdaLogGroup: logs.LogGroup;
+    public readonly enrollStudentLambda: lambda.Function;
+    public readonly enrollStudentLambdaLogGroup: logs.LogGroup;
+    public readonly listSchedulesLambda: lambda.Function;
+    public readonly listSchedulesLambdaLogGroup: logs.LogGroup;
     public readonly api: apigateway.RestApi;
     public readonly apiLogGroup: logs.LogGroup;
     public readonly usagePlan: apigateway.UsagePlan;
@@ -105,6 +113,12 @@ export class SmartAttendanceTrackerStack extends Stack {
                 otp: true,
             },
         });
+        // const cfnUserPool = this.userPool.node.defaultChild as cognito.CfnUserPool;
+        // cfnUserPool.emailConfiguration = {
+        //     emailSendingAccount: 'DEVELOPER',
+        //     sourceArn: `arn:aws:ses:us-east-1:475721340184:identity/shelkevarun@gmail.com`,
+        // };
+        //
 
         // Create Cognito User Pool Groups for role-based access control
         const adminGroup = new cognito.CfnUserPoolGroup(this, 'AdminGroup', {
@@ -644,6 +658,101 @@ export class SmartAttendanceTrackerStack extends Stack {
 
         this.classSchedulesTable.grantReadWriteData(this.upsertScheduleLambda);
 
+        // Admin Student Management Lambda Functions
+        this.listStudentsLambdaLogGroup = new logs.LogGroup(this, 'ListStudentsLogGroup', {
+            logGroupName: '/aws/lambda/list-students',
+            retention: logs.RetentionDays.ONE_WEEK,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+        });
+
+        this.listStudentsLambda = new lambda.Function(this, 'ListStudentsFunction', {
+            runtime: lambda.Runtime.PYTHON_3_13,
+            architecture: lambda.Architecture.ARM_64,
+            handler: 'list_students.handler',
+            code: lambda.Code.fromAsset('../backend/src/lambda/student'),
+            functionName: 'list-students',
+            timeout: cdk.Duration.seconds(10),
+            memorySize: 256,
+            logGroup: this.listStudentsLambdaLogGroup,
+            layers: [this.sharedLambdaLayer],
+            environment: {
+                STUDENTS_TABLE_NAME: this.studentsTable.tableName,
+            },
+        });
+
+        this.studentsTable.grantReadData(this.listStudentsLambda);
+
+        this.getStudentEnrollmentsLambdaLogGroup = new logs.LogGroup(this, 'GetStudentEnrollmentsLogGroup', {
+            logGroupName: '/aws/lambda/get-student-enrollments',
+            retention: logs.RetentionDays.ONE_WEEK,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+        });
+
+        this.getStudentEnrollmentsLambda = new lambda.Function(this, 'GetStudentEnrollmentsFunction', {
+            runtime: lambda.Runtime.PYTHON_3_13,
+            architecture: lambda.Architecture.ARM_64,
+            handler: 'get_student_enrollments.handler',
+            code: lambda.Code.fromAsset('../backend/src/lambda/student/courses'),
+            functionName: 'get-student-enrollments',
+            timeout: cdk.Duration.seconds(10),
+            memorySize: 256,
+            logGroup: this.getStudentEnrollmentsLambdaLogGroup,
+            layers: [this.sharedLambdaLayer],
+            environment: {
+                STUDENT_COURSES_TABLE_NAME: this.studentCoursesTable.tableName,
+            },
+        });
+
+        this.studentCoursesTable.grantReadData(this.getStudentEnrollmentsLambda);
+
+        this.enrollStudentLambdaLogGroup = new logs.LogGroup(this, 'EnrollStudentLogGroup', {
+            logGroupName: '/aws/lambda/enroll-student',
+            retention: logs.RetentionDays.ONE_WEEK,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+        });
+
+        this.enrollStudentLambda = new lambda.Function(this, 'EnrollStudentFunction', {
+            runtime: lambda.Runtime.PYTHON_3_13,
+            architecture: lambda.Architecture.ARM_64,
+            handler: 'enroll_student.handler',
+            code: lambda.Code.fromAsset('../backend/src/lambda/student/courses'),
+            functionName: 'enroll-student',
+            timeout: cdk.Duration.seconds(10),
+            memorySize: 256,
+            logGroup: this.enrollStudentLambdaLogGroup,
+            layers: [this.sharedLambdaLayer],
+            environment: {
+                STUDENT_COURSES_TABLE_NAME: this.studentCoursesTable.tableName,
+                CLASS_SCHEDULES_TABLE_NAME: this.classSchedulesTable.tableName,
+            },
+        });
+
+        this.studentCoursesTable.grantWriteData(this.enrollStudentLambda);
+        this.classSchedulesTable.grantReadData(this.enrollStudentLambda);
+
+        this.listSchedulesLambdaLogGroup = new logs.LogGroup(this, 'ListSchedulesLogGroup', {
+            logGroupName: '/aws/lambda/list-schedules',
+            retention: logs.RetentionDays.ONE_WEEK,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+        });
+
+        this.listSchedulesLambda = new lambda.Function(this, 'ListSchedulesFunction', {
+            runtime: lambda.Runtime.PYTHON_3_13,
+            architecture: lambda.Architecture.ARM_64,
+            handler: 'list_schedules.handler',
+            code: lambda.Code.fromAsset('../backend/src/lambda/schedule'),
+            functionName: 'list-schedules',
+            timeout: cdk.Duration.seconds(10),
+            memorySize: 256,
+            logGroup: this.listSchedulesLambdaLogGroup,
+            layers: [this.sharedLambdaLayer],
+            environment: {
+                CLASS_SCHEDULES_TABLE_NAME: this.classSchedulesTable.tableName,
+            },
+        });
+
+        this.classSchedulesTable.grantReadData(this.listSchedulesLambda);
+
         this.registerStudentFaceLambdaLogGroup = new logs.LogGroup(this, 'RegisterStudentFaceLogGroup', {
             logGroupName: '/aws/lambda/register-student-face',
             retention: logs.RetentionDays.ONE_WEEK,
@@ -736,7 +845,7 @@ export class SmartAttendanceTrackerStack extends Stack {
                 FACE_SIMILARITY_THRESHOLD: '80.0',
                 SNS_TOPIC_ARN: this.attendanceNotificationTopic.topicArn,
             },
-            reservedConcurrentExecutions: 10,
+            //reservedConcurrentExecutions: 2,
         });
 
         // Grant Lambda permissions to read from S3 (both face_registrations and faces/attendance)
@@ -947,6 +1056,81 @@ export class SmartAttendanceTrackerStack extends Stack {
 
         // Add POST /v1/universities/{university_code}/schedules/{schedule_id}
         scheduleIdResource.addMethod('POST', upsertScheduleIntegration, {
+            authorizer: authorizer,
+            authorizationType: apigateway.AuthorizationType.COGNITO,
+            apiKeyRequired: true,
+        });
+
+        // Admin Student Management API Routes
+        // Create Lambda integrations
+        const listStudentsIntegration = new apigateway.LambdaIntegration(this.listStudentsLambda, {
+            proxy: true,
+            allowTestInvoke: true,
+        });
+
+        const getStudentEnrollmentsIntegration = new apigateway.LambdaIntegration(this.getStudentEnrollmentsLambda, {
+            proxy: true,
+            allowTestInvoke: true,
+        });
+
+        const enrollStudentIntegration = new apigateway.LambdaIntegration(this.enrollStudentLambda, {
+            proxy: true,
+            allowTestInvoke: true,
+        });
+
+        const listSchedulesIntegration = new apigateway.LambdaIntegration(this.listSchedulesLambda, {
+            proxy: true,
+            allowTestInvoke: true,
+        });
+
+        // Create /v1/admin resource
+        const adminResource = v1Resource.addResource('admin', {
+            defaultCorsPreflightOptions: universityCorsOptions,
+        });
+
+        // Create /v1/admin/students resource
+        const adminStudentsResource = adminResource.addResource('students', {
+            defaultCorsPreflightOptions: universityCorsOptions,
+        });
+
+        // Add GET /v1/admin/students (list all students)
+        adminStudentsResource.addMethod('GET', listStudentsIntegration, {
+            authorizer: authorizer,
+            authorizationType: apigateway.AuthorizationType.COGNITO,
+            apiKeyRequired: true,
+        });
+
+        // Create /v1/admin/students/{user_id} resource
+        const adminStudentIdResource = adminStudentsResource.addResource('{user_id}', {
+            defaultCorsPreflightOptions: universityCorsOptions,
+        });
+
+        // Create /v1/admin/students/{user_id}/enrollments resource
+        const enrollmentsResource = adminStudentIdResource.addResource('enrollments', {
+            defaultCorsPreflightOptions: universityCorsOptions,
+        });
+
+        // Add GET /v1/admin/students/{user_id}/enrollments
+        enrollmentsResource.addMethod('GET', getStudentEnrollmentsIntegration, {
+            authorizer: authorizer,
+            authorizationType: apigateway.AuthorizationType.COGNITO,
+            apiKeyRequired: true,
+        });
+
+        // Add POST /v1/admin/students/{user_id}/enrollments
+        enrollmentsResource.addMethod('POST', enrollStudentIntegration, {
+            authorizer: authorizer,
+            authorizationType: apigateway.AuthorizationType.COGNITO,
+            apiKeyRequired: true,
+        });
+
+        // Create /v1/schedules resource (for listing schedules)
+        const schedulesListResource = v1Resource.addResource('schedules', {
+            defaultCorsPreflightOptions: universityCorsOptions,
+        });
+
+        // Add GET /v1/schedules (list all schedules)
+        schedulesListResource.addMethod('GET', listSchedulesIntegration, {
             authorizer: authorizer,
             authorizationType: apigateway.AuthorizationType.COGNITO,
             apiKeyRequired: true,
