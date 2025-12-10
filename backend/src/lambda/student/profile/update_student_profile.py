@@ -1,13 +1,22 @@
-import json
+"""
+Update Student Profile Lambda Handler
+
+Allows students to update their profile information including
+student_id (one-time only) and phone_number.
+"""
+
 import logging
 import os
 import re
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import boto3
 from botocore.exceptions import ClientError
 
 from student.shared.model.StudentModel import StudentModel
+from utils.api_response import APIResponse
+from utils.request_utils import parse_json_body
 
 # Configure logging
 logger = logging.getLogger()
@@ -59,22 +68,10 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         user_id = event['requestContext']['authorizer']['claims']['sub']
         logger.info(f"Processing profile update for user_id: {user_id}")
 
-        # Parse request body
-        try:
-            body = json.loads(event.get('body', '{}'))
-        except json.JSONDecodeError:
-            logger.warning(f"Invalid JSON in request body for user_id: {user_id}")
-            return {
-                'statusCode': 400,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Credentials': 'true',
-                },
-                'body': json.dumps({
-                    'message': 'Invalid request body: must be valid JSON'
-                })
-            }
+        # Parse and validate request body
+        body, error = parse_json_body(event)
+        if error:
+            return error
 
         # Extract updatable fields
         student_id: Optional[str] = body.get('student_id')
@@ -83,50 +80,24 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Validate at least one field is provided
         if student_id is None and phone_number is None:
             logger.warning(f"No fields to update for user_id: {user_id}")
-            return {
-                'statusCode': 400,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Credentials': 'true',
-                },
-                'body': json.dumps({
-                    'message': 'At least one field (student_id or phone_number) must be provided'
-                })
-            }
+            return APIResponse.bad_request(
+                'At least one field (student_id or phone_number) must be provided'
+            )
 
         # Validate phone_number format if provided
         if phone_number is not None and phone_number.strip():
             if not validate_phone_number(phone_number):
                 logger.warning(f"Invalid phone number format for user_id: {user_id}")
-                return {
-                    'statusCode': 400,
-                    'headers': {
-                        'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*',
-                        'Access-Control-Allow-Credentials': 'true',
-                    },
-                    'body': json.dumps({
-                        'message': 'Invalid phone number format. Must contain 10-15 digits and may start with +'
-                    })
-                }
+                return APIResponse.bad_request(
+                    'Invalid phone number format. Must contain 10-15 digits and may start with +'
+                )
 
         # Fetch existing student record
         get_response = students_table.get_item(Key={'user_id': user_id})
 
         if 'Item' not in get_response:
             logger.warning(f"Student profile not found for user_id: {user_id}")
-            return {
-                'statusCode': 404,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Credentials': 'true',
-                },
-                'body': json.dumps({
-                    'message': 'Student profile not found'
-                })
-            }
+            return APIResponse.not_found('Student profile not found', resource_type='Student')
 
         existing_student = get_response['Item']
 
@@ -134,20 +105,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if student_id is not None:
             existing_student_id = existing_student.get('student_id')
             if existing_student_id and existing_student_id.strip():
-                logger.warning(
-                    f"Attempt to update existing student_id for user_id: {user_id}"
-                )
-                return {
-                    'statusCode': 403,
-                    'headers': {
-                        'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*',
-                        'Access-Control-Allow-Credentials': 'true',
-                    },
-                    'body': json.dumps({
-                        'message': 'Student ID can only be set once and cannot be changed'
-                    })
-                }
+                logger.warning(f"Attempt to update existing student_id for user_id: {user_id}")
+                return APIResponse.forbidden('Student ID can only be set once and cannot be changed')
 
         # Build update expression dynamically
         update_expressions = []
@@ -169,9 +128,6 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Always update updated_at timestamp
         update_expressions.append('#ua = :ua')
         expression_attribute_names['#ua'] = 'updated_at'
-
-        # Import datetime here to get current timestamp
-        from datetime import datetime, timezone
         expression_attribute_values[':ua'] = datetime.now(timezone.utc).isoformat()
 
         # Construct update expression
@@ -202,70 +158,21 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         }
 
         logger.info(f"Successfully updated profile for user_id: {user_id}")
-
-        return {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps(profile_data)
-        }
+        return APIResponse.ok(profile_data)
 
     except KeyError as e:
         logger.error(f"Missing required field in event: {str(e)}")
-        return {
-            'statusCode': 400,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps({
-                'message': 'Invalid request: missing authorization claims'
-            })
-        }
+        return APIResponse.bad_request('Invalid request: missing authorization claims')
 
     except ClientError as e:
         error_code = e.response['Error']['Code']
         logger.error(f"DynamoDB error: {error_code} - {str(e)}")
 
         if error_code == 'ConditionalCheckFailedException':
-            return {
-                'statusCode': 409,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Credentials': 'true',
-                },
-                'body': json.dumps({
-                    'message': 'Profile update conflict. Please refresh and try again.'
-                })
-            }
+            return APIResponse.conflict('Profile update conflict. Please refresh and try again.')
 
-        return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps({
-                'message': 'Internal server error while updating profile'
-            })
-        }
+        return APIResponse.internal_error('Failed to update student profile')
 
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}", exc_info=True)
-        return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps({
-                'message': 'Internal server error'
-            })
-        }
+        return APIResponse.internal_error('An unexpected error occurred')

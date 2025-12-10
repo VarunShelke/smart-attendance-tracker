@@ -1,15 +1,15 @@
-import json
 import logging
 import os
-import base64
-from typing import Any, Dict, Optional
-from decimal import Decimal
+from typing import Any, Dict
 
 import boto3
 from botocore.exceptions import ClientError
 
 from schedule.shared.model.ScheduleModel import ScheduleModel
+from utils.api_response import APIResponse
 from utils.auth_utils import require_role, UserRole, AuthorizationError, create_forbidden_response
+from utils.pagination_utils import decode_last_evaluated_key, parse_page_size, build_pagination_response
+from utils.request_utils import extract_query_parameter
 
 # Configure logging
 logger = logging.getLogger()
@@ -25,55 +25,6 @@ class_schedules_table = dynamodb.Table(CLASS_SCHEDULES_TABLE_NAME)
 # Constants
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100
-
-
-def decimal_to_float(obj):
-    """
-    Convert Decimal objects to float for JSON serialization.
-    """
-    if isinstance(obj, Decimal):
-        return float(obj)
-    raise TypeError
-
-
-def encode_last_evaluated_key(key: Optional[Dict[str, Any]]) -> Optional[str]:
-    """
-    Encode DynamoDB LastEvaluatedKey to base64 string for pagination.
-
-    Args:
-        key: DynamoDB LastEvaluatedKey dictionary
-
-    Returns:
-        Base64-encoded string or None
-    """
-    if not key:
-        return None
-    try:
-        key_json = json.dumps(key, default=decimal_to_float)
-        return base64.b64encode(key_json.encode('utf-8')).decode('utf-8')
-    except Exception as e:
-        logger.error(f"Error encoding last evaluated key: {str(e)}")
-        return None
-
-
-def decode_last_evaluated_key(encoded_key: Optional[str]) -> Optional[Dict[str, Any]]:
-    """
-    Decode base64 string to DynamoDB LastEvaluatedKey.
-
-    Args:
-        encoded_key: Base64-encoded key string
-
-    Returns:
-        DynamoDB key dictionary or None
-    """
-    if not encoded_key:
-        return None
-    try:
-        key_json = base64.b64decode(encoded_key.encode('utf-8')).decode('utf-8')
-        return json.loads(key_json)
-    except Exception as e:
-        logger.error(f"Error decoding last evaluated key: {str(e)}")
-        return None
 
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -98,24 +49,18 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return create_forbidden_response()
 
         # Extract query parameters
-        query_params = event.get('queryStringParameters') or {}
+        university_code = extract_query_parameter(event, 'university_code')
+        page_size_str = extract_query_parameter(event, 'page_size')
+        last_key_param = extract_query_parameter(event, 'last_key')
 
-        # Get optional university_code filter
-        university_code = query_params.get('university_code')
+        # Parse page size
+        page_size = parse_page_size(page_size_str, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE)
 
-        # Get page size (default: 20, max: 100)
-        try:
-            page_size = int(query_params.get('page_size', DEFAULT_PAGE_SIZE))
-            page_size = min(page_size, MAX_PAGE_SIZE)  # Cap at maximum
-            page_size = max(page_size, 1)  # Minimum 1
-        except (ValueError, TypeError):
-            page_size = DEFAULT_PAGE_SIZE
-
-        # Get last evaluated key for pagination
-        last_key_param = query_params.get('last_key')
+        # Decode pagination key
         exclusive_start_key = decode_last_evaluated_key(last_key_param)
 
-        logger.info(f"Listing schedules with page_size: {page_size}, university_code: {university_code}, has_last_key: {bool(exclusive_start_key)}")
+        logger.info(
+            f"Listing schedules with page_size: {page_size}, university_code: {university_code}, has_last_key: {bool(exclusive_start_key)}")
 
         # Scan DynamoDB table with pagination
         scan_params = {
@@ -142,61 +87,33 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 schedules.append(schedule.to_dict())
             except Exception as e:
                 logger.error(f"Error parsing schedule item: {str(e)}")
-                # Skip malformed items but continue processing
                 continue
-
-        # Get pagination info
-        last_evaluated_key = response.get('LastEvaluatedKey')
-        encoded_last_key = encode_last_evaluated_key(last_evaluated_key)
-        has_more = last_evaluated_key is not None
 
         # Sort schedules by course_name for consistent ordering
         schedules.sort(key=lambda x: x.get('course_name', '').lower())
 
-        # Prepare response
+        # Build pagination response
+        pagination_data = build_pagination_response(
+            items=schedules,
+            last_evaluated_key=response.get('LastEvaluatedKey')
+        )
+
+        # Rename 'items' to 'schedules' for API consistency
         response_data = {
-            'schedules': schedules,
-            'count': len(schedules),
-            'last_evaluated_key': encoded_last_key,
-            'has_more': has_more
+            'schedules': pagination_data['items'],
+            'count': pagination_data['count'],
+            'has_more': pagination_data['has_more']
         }
+        if 'last_evaluated_key' in pagination_data:
+            response_data['last_evaluated_key'] = pagination_data['last_evaluated_key']
 
-        logger.info(f"Successfully retrieved {len(schedules)} schedules, has_more: {has_more}")
-
-        return {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps(response_data)
-        }
+        logger.info(f"Successfully retrieved {len(schedules)} schedules")
+        return APIResponse.ok(response_data)
 
     except ClientError as e:
         logger.error(f"DynamoDB error: {str(e)}")
-        return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps({
-                'message': 'Internal server error while listing schedules'
-            })
-        }
+        return APIResponse.internal_error('Failed to list schedules')
 
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}", exc_info=True)
-        return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps({
-                'message': 'Internal server error'
-            })
-        }
+        return APIResponse.internal_error('An unexpected error occurred')

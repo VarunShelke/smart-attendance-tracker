@@ -1,4 +1,9 @@
-import json
+"""
+Upsert University Lambda Handler
+
+Admin-only endpoint to create or update university information.
+"""
+
 import logging
 import os
 import uuid
@@ -10,7 +15,9 @@ from botocore.exceptions import ClientError
 from pydantic import ValidationError
 
 from university.shared.model.UniversityModel import UniversityModel
+from utils.api_response import APIResponse
 from utils.auth_utils import require_role, UserRole, AuthorizationError, create_forbidden_response
+from utils.request_utils import parse_json_body, extract_path_parameter
 
 # Configure logging
 logger = logging.getLogger()
@@ -45,57 +52,27 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return create_forbidden_response()
 
         # Extract university_code from path parameters
-        university_code = event['pathParameters']['university_code'].upper()
+        university_code, error = extract_path_parameter(event, 'university_code')
+        if error:
+            return error
+        university_code = university_code.upper()
         logger.info(f"Processing upsert for university code: {university_code}")
 
         # Parse request body
-        try:
-            body = json.loads(event.get('body', '{}'))
-        except json.JSONDecodeError:
-            logger.warning(f"Invalid JSON in request body for university_code: {university_code}")
-            return {
-                'statusCode': 400,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Credentials': 'true',
-                },
-                'body': json.dumps({
-                    'message': 'Invalid request body: must be valid JSON'
-                })
-            }
+        body, error = parse_json_body(event)
+        if error:
+            return error
 
         # Validate required fields in body
-        required_fields = ['university_name', 'domain']
-        missing_fields = [field for field in required_fields if field not in body]
-        if missing_fields:
-            logger.warning(f"Missing required fields: {missing_fields}")
-            return {
-                'statusCode': 400,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Credentials': 'true',
-                },
-                'body': json.dumps({
-                    'message': f'Missing required fields: {", ".join(missing_fields)}'
-                })
-            }
+        from utils.request_utils import validate_required_fields
+        error = validate_required_fields(body, ['university_name', 'domain'])
+        if error:
+            return error
 
         # Check if university_code in body matches path parameter (if provided)
         if 'university_code' in body and body['university_code'].upper() != university_code:
             logger.warning(f"Mismatched university_code in path and body")
-            return {
-                'statusCode': 400,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Credentials': 'true',
-                },
-                'body': json.dumps({
-                    'message': 'University code in path must match university_code in body'
-                })
-            }
+            return APIResponse.bad_request('University code in path must match university_code in body')
 
         # Query to check if university already exists
         query_response = universities_table.query(
@@ -129,72 +106,22 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             university_model = UniversityModel.from_dict(university_data)
         except ValidationError as ve:
             logger.warning(f"Validation error: {str(ve)}")
-            return {
-                'statusCode': 400,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Credentials': 'true',
-                },
-                'body': json.dumps({
-                    'message': 'Validation error',
-                    'errors': ve.errors()
-                })
-            }
+            return APIResponse.unprocessable_entity('Validation error', errors=ve.errors())
 
         # Save to DynamoDB
         universities_table.put_item(Item=university_model.to_dynamodb_item())
 
         logger.info(f"Successfully {'updated' if is_update else 'created'} university: {university_code}")
 
-        return {
-            'statusCode': 200 if is_update else 201,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps(university_model.to_dict())
-        }
-
-    except KeyError as e:
-        logger.error(f"Missing required field in event: {str(e)}")
-        return {
-            'statusCode': 400,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps({
-                'message': 'Invalid request: missing required parameters'
-            })
-        }
+        if is_update:
+            return APIResponse.ok(university_model.to_dict())
+        else:
+            return APIResponse.created(university_model.to_dict())
 
     except ClientError as e:
         logger.error(f"DynamoDB error: {str(e)}")
-        return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps({
-                'message': 'Internal server error while upserting university'
-            })
-        }
+        return APIResponse.internal_error('Failed to upsert university')
 
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}", exc_info=True)
-        return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps({
-                'message': 'Internal server error'
-            })
-        }
+        return APIResponse.internal_error('An unexpected error occurred')

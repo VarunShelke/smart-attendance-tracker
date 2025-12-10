@@ -1,3 +1,11 @@
+"""
+Create Student Profile Lambda Handler
+
+Automatically triggered by Cognito PostConfirmation to create
+student profile and subscribe to notifications.
+"""
+
+import logging
 import os
 from datetime import datetime, timezone
 from typing import Any, Dict
@@ -8,6 +16,10 @@ from botocore.exceptions import ClientError
 from student.shared.model.StudentModel import StudentModel
 from utils import aws_utils
 from utils.sns_utils import subscribe_user_to_notifications
+
+# Configure logging
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 dynamodb = aws_utils.get_dynamodb_resource()
 table_name = os.environ.get('STUDENTS_TABLE_NAME', 'students')
@@ -21,13 +33,21 @@ cognito_client = boto3.client('cognito-idp')
 
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """
+    Cognito PostConfirmation trigger handler.
+
+    Creates student profile, subscribes to notifications, and assigns to Student group.
+
+    Note: This is a Cognito trigger, not an API Gateway handler, so it returns
+    the event object directly rather than an API Gateway response.
+    """
     try:
         user_attributes = event.get('request', {}).get('userAttributes', {})
         trigger_source = event.get('triggerSource', '')
-        user_pool_id = event.get('userPoolId')  # Extract from Cognito event
+        user_pool_id = event.get('userPoolId')
 
         if trigger_source != 'PostConfirmation_ConfirmSignUp':
-            print(f"Skipping non-signup trigger: {trigger_source}")
+            logger.info(f"Skipping non-signup trigger: {trigger_source}")
             return event
 
         user_id = user_attributes.get('sub')
@@ -49,12 +69,12 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     topic_arn=SNS_TOPIC_ARN,
                     user_email=email
                 )
-                print(f"Successfully subscribed {email} to SNS topic. ARN: {subscription_arn}")
+                logger.info(f"Successfully subscribed {email} to SNS topic. ARN: {subscription_arn}")
             except Exception as e:
-                print(f"Failed to subscribe to SNS topic: {str(e)}")
+                logger.error(f"Failed to subscribe to SNS topic: {str(e)}")
                 # Continue with profile creation even if SNS subscription fails
         else:
-            print("SNS topic ARN not configured, skipping subscription")
+            logger.warning("SNS topic ARN not configured, skipping subscription")
 
         student = StudentModel(
             user_id=user_id,
@@ -71,7 +91,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             updated_at=current_time,
         )
         students_table.put_item(Item=student.to_dynamodb_item())
-        print(f"Successfully created student record for user_id: {user_id}, email: {email}")
+        logger.info(f"Successfully created student record for user_id: {user_id}, email: {email}")
 
         # Assign user to Student group in Cognito
         if user_pool_id:
@@ -81,21 +101,21 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     Username=user_id,
                     GroupName='Student'
                 )
-                print(f"Successfully added user {user_id} to Student group")
+                logger.info(f"Successfully added user {user_id} to Student group")
             except Exception as e:
-                print(f"Failed to add user to Student group: {str(e)}")
+                logger.error(f"Failed to add user to Student group: {str(e)}")
                 # Continue even if group assignment fails
         else:
-            print("UserPoolId not found in event, skipping group assignment")
+            logger.warning("UserPoolId not found in event, skipping group assignment")
 
     except ClientError as e:
         error_code = e.response['Error']['Code']
         error_message = e.response['Error']['Message']
-        print(f"DynamoDB ClientError: {error_code} - {error_message}")
-        print(f"Failed to create student record, but allowing sign-up to proceed")
+        logger.error(f"DynamoDB ClientError: {error_code} - {error_message}")
+        logger.warning("Failed to create student record, but allowing sign-up to proceed")
 
     except Exception as e:
-        print(f"Unexpected error: {str(e)}")
-        print(f"Failed to create student record, but allowing sign-up to proceed")
+        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
+        logger.warning("Failed to create student record, but allowing sign-up to proceed")
 
     return event

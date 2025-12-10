@@ -2,8 +2,8 @@ import base64
 import json
 import logging
 import uuid
-from decimal import Decimal
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 
 from attendance.shared.model import AttendanceModel, AttendanceStatus
@@ -96,13 +96,13 @@ def create_processing_attendance_record(
 
 
 def send_to_comparison_queue(
-    queue_url: str,
-    user_id: str,
-    tracking_id: str,
-    face_s3_key: str,
-    attendance_date: str,
-    course_id: Optional[str] = None,
-    schedule_id: Optional[str] = None
+        queue_url: str,
+        user_id: str,
+        tracking_id: str,
+        face_s3_key: str,
+        attendance_date: str,
+        course_id: Optional[str] = None,
+        schedule_id: Optional[str] = None
 ) -> None:
     """
     Send a message to SQS queue for face comparison processing.
@@ -177,12 +177,12 @@ def get_attendance_by_tracking_id(table_name: str, tracking_id: str) -> Optional
 
 
 def update_attendance_status(
-    table_name: str,
-    user_id: str,
-    attendance_date: str,
-    status: AttendanceStatus,
-    similarity_score: Optional[float] = None,
-    error_message: Optional[str] = None
+        table_name: str,
+        user_id: str,
+        attendance_date: str,
+        status: AttendanceStatus,
+        similarity_score: Optional[float] = None,
+        error_message: Optional[str] = None
 ) -> AttendanceModel:
     """
     Update attendance record with verification results.
@@ -252,9 +252,9 @@ def update_attendance_status(
 
 
 def get_attendance_by_user_and_date(
-    table_name: str,
-    user_id: str,
-    attendance_date: str
+        table_name: str,
+        user_id: str,
+        attendance_date: str
 ) -> Optional[AttendanceModel]:
     """
     Retrieve attendance record by user_id and attendance_date.
