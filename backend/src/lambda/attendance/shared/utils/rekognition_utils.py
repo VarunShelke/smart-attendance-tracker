@@ -10,11 +10,11 @@ class FaceComparisonResult:
     """Result of face comparison operation."""
 
     def __init__(
-        self,
-        success: bool,
-        similarity_score: Optional[float] = None,
-        error_message: Optional[str] = None,
-        error_code: Optional[str] = None
+            self,
+            success: bool,
+            similarity_score: Optional[float] = None,
+            error_message: Optional[str] = None,
+            error_code: Optional[str] = None
     ):
         self.success = success
         self.similarity_score = similarity_score
@@ -31,10 +31,10 @@ class FaceComparisonResult:
 
 
 def compare_faces_with_rekognition(
-    source_s3_key: str,
-    target_s3_key: str,
-    bucket_name: str,
-    similarity_threshold: float = 80.0
+        source_s3_key: str,
+        target_s3_key: str,
+        bucket_name: str,
+        similarity_threshold: float = 80.0
 ) -> FaceComparisonResult:
     """
     Compare two faces using AWS Rekognition.
@@ -177,8 +177,8 @@ def compare_faces_with_rekognition(
 
 
 def validate_face_image_quality(
-    s3_key: str,
-    bucket_name: str
+        s3_key: str,
+        bucket_name: str
 ) -> Dict[str, Any]:
     """
     Validate image quality using Rekognition DetectFaces.

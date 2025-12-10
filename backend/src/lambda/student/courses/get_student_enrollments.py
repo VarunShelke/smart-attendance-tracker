@@ -1,4 +1,9 @@
-import json
+"""
+Get Student Enrollments Lambda Handler
+
+Admin-only endpoint to retrieve enrollments for a specific student.
+"""
+
 import logging
 import os
 from typing import Any, Dict
@@ -7,7 +12,9 @@ import boto3
 from botocore.exceptions import ClientError
 
 from student.shared.model.StudentCoursesModel import StudentCourseModel
+from utils.api_response import APIResponse
 from utils.auth_utils import require_role, UserRole, AuthorizationError, create_forbidden_response
+from utils.request_utils import extract_path_parameter
 
 # Configure logging
 logger = logging.getLogger()
@@ -43,22 +50,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return create_forbidden_response()
 
         # Extract path parameters
-        path_params = event.get('pathParameters') or {}
-        user_id = path_params.get('user_id')
-
-        if not user_id:
-            logger.warning("Missing user_id in path parameters")
-            return {
-                'statusCode': 400,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Credentials': 'true',
-                },
-                'body': json.dumps({
-                    'message': 'Missing user_id in path'
-                })
-            }
+        user_id, error = extract_path_parameter(event, 'user_id')
+        if error:
+            return error
 
         logger.info(f"Fetching enrollments for student: {user_id}")
 
@@ -83,45 +77,12 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         logger.info(f"Successfully retrieved {len(enrollments)} enrollments for student {user_id}")
 
-        # Prepare response
-        response_data = {
-            'enrollments': enrollments
-        }
-
-        return {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps(response_data)
-        }
+        return APIResponse.ok({'enrollments': enrollments})
 
     except ClientError as e:
         logger.error(f"DynamoDB error: {str(e)}")
-        return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps({
-                'message': 'Internal server error while fetching enrollments'
-            })
-        }
+        return APIResponse.internal_error('Failed to fetch enrollments')
 
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}", exc_info=True)
-        return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps({
-                'message': 'Internal server error'
-            })
-        }
+        return APIResponse.internal_error('An unexpected error occurred')

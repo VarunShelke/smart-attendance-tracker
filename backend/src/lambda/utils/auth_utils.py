@@ -1,6 +1,14 @@
-import json
+"""
+Authentication and authorization utilities for Lambda handlers.
+
+Provides functions for extracting user context from Cognito claims,
+role-based authorization checks, and standardized auth error responses.
+"""
+
 from enum import Enum
 from typing import Dict, List, Any
+
+from utils.api_response import APIResponse
 
 
 class UserRole(str, Enum):
@@ -31,6 +39,9 @@ def extract_user_context(event: Dict[str, Any]) -> Dict[str, Any]:
             'email': 'user@example.com',
             'groups': ['Student', 'Admin']
         }
+
+    Raises:
+        KeyError: If required claims are missing from event
     """
     claims = event['requestContext']['authorizer']['claims']
     groups_str = claims.get('cognito:groups', '')
@@ -76,58 +87,74 @@ def require_role(event: Dict[str, Any], required_roles: List[str]) -> Dict[str, 
 
 
 def is_admin(event: Dict[str, Any]) -> bool:
-    """Check if user is in Admin group."""
+    """
+    Check if user is in Admin group.
+
+    Args:
+        event: API Gateway event
+
+    Returns:
+        True if user is admin, False otherwise
+    """
     user_context = extract_user_context(event)
     return UserRole.ADMIN in user_context['groups']
 
 
 def is_instructor(event: Dict[str, Any]) -> bool:
-    """Check if user is in Instructor group."""
+    """
+    Check if user is in Instructor group.
+
+    Args:
+        event: API Gateway event
+
+    Returns:
+        True if user is instructor, False otherwise
+    """
     user_context = extract_user_context(event)
     return UserRole.INSTRUCTOR in user_context['groups']
 
 
 def is_student(event: Dict[str, Any]) -> bool:
-    """Check if user is in Student group."""
+    """
+    Check if user is in Student group.
+
+    Args:
+        event: API Gateway event
+
+    Returns:
+        True if user is student, False otherwise
+    """
     user_context = extract_user_context(event)
     return UserRole.STUDENT in user_context['groups']
 
 
-def create_forbidden_response() -> Dict[str, Any]:
+def create_forbidden_response(message: str = "Insufficient permissions") -> Dict[str, Any]:
     """
     Create a standard 403 Forbidden response for authorization failures.
 
+    Args:
+        message: Custom error message (optional)
+
     Returns:
         API Gateway response dict with 403 status code
+
+    Example:
+        return create_forbidden_response("Admin access required")
     """
-    return {
-        'statusCode': 403,
-        'headers': {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Credentials': 'true',
-        },
-        'body': json.dumps({
-            'message': 'Forbidden: Insufficient permissions'
-        })
-    }
+    return APIResponse.forbidden(message)
 
 
-def create_unauthorized_response() -> Dict[str, Any]:
+def create_unauthorized_response(message: str = "Authentication required") -> Dict[str, Any]:
     """
     Create a standard 401 Unauthorized response for missing/invalid authentication.
 
+    Args:
+        message: Custom error message (optional)
+
     Returns:
         API Gateway response dict with 401 status code
+
+    Example:
+        return create_unauthorized_response("Invalid token")
     """
-    return {
-        'statusCode': 401,
-        'headers': {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Credentials': 'true',
-        },
-        'body': json.dumps({
-            'message': 'Unauthorized: Authentication required'
-        })
-    }
+    return APIResponse.unauthorized(message)

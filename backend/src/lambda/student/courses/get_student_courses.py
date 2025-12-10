@@ -1,4 +1,9 @@
-import json
+"""
+Get Student Courses Lambda Handler
+
+Retrieves courses for students with role-based access control.
+"""
+
 import logging
 import os
 from typing import Any, Dict, List
@@ -7,7 +12,9 @@ import boto3
 from botocore.exceptions import ClientError
 
 from student.shared.model.StudentCoursesModel import StudentCourseModel
-from utils.auth_utils import extract_user_context, is_admin, is_instructor, create_forbidden_response
+from utils.api_response import APIResponse
+from utils.auth_utils import extract_user_context, is_admin, is_instructor
+from utils.request_utils import extract_query_parameter
 
 # Configure logging
 logger = logging.getLogger()
@@ -46,8 +53,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.info(f"User {requesting_user_id} with roles {user_groups} requesting courses")
 
         # Get query parameters
-        query_params = event.get('queryStringParameters') or {}
-        schedule_id = query_params.get('schedule_id')
+        schedule_id = extract_query_parameter(event, 'schedule_id')
 
         # Determine query based on role
         courses = []
@@ -77,59 +83,19 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Convert courses to dict format
         courses_data = [course.to_dict() for course in courses]
 
-        return {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps({
-                'courses': courses_data
-            })
-        }
+        return APIResponse.ok({'courses': courses_data})
 
     except KeyError as e:
         logger.error(f"Missing required field in event: {str(e)}")
-        return {
-            'statusCode': 400,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps({
-                'message': 'Invalid request: missing authorization claims'
-            })
-        }
+        return APIResponse.bad_request('Invalid request: missing authorization claims')
 
     except ClientError as e:
         logger.error(f"DynamoDB error: {str(e)}")
-        return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps({
-                'message': 'Internal server error while fetching courses'
-            })
-        }
+        return APIResponse.internal_error('Failed to fetch courses')
 
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}", exc_info=True)
-        return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps({
-                'message': 'Internal server error'
-            })
-        }
+        return APIResponse.internal_error('An unexpected error occurred')
 
 
 def _query_courses_by_user_id(user_id: str) -> List[StudentCourseModel]:

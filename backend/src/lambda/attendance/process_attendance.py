@@ -17,7 +17,6 @@ from utils.request_utils import create_response
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Environment variables
 S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME')
 STUDENTS_TABLE_NAME = os.environ.get('STUDENTS_TABLE_NAME')
 STUDENT_ATTENDANCE_TABLE_NAME = os.environ.get('STUDENT_ATTENDANCE_TABLE_NAME')
@@ -34,18 +33,15 @@ def validate_request(event: Dict[str, Any]) -> Dict[str, Any] | None:
     """
     http_method = event.get('httpMethod', '').upper()
 
-    # Handle CORS preflight
     if http_method == 'OPTIONS':
         return create_response(200, {'message': 'CORS preflight successful'})
 
-    # Validate HTTP method
     if http_method != 'POST':
         return create_response(405, {
             'error': 'Method Not Allowed',
             'message': f'HTTP method {http_method} is not supported. Use POST.'
         })
 
-    # Validate request body exists
     if not event.get('body'):
         return create_response(400, {
             'error': 'Bad Request',
@@ -57,12 +53,10 @@ def validate_request(event: Dict[str, Any]) -> Dict[str, Any] | None:
 
 def handler(event, context):
     try:
-        # Validate request
         validation_error = validate_request(event)
         if validation_error:
             return validation_error
 
-        # Parse request body
         body_str = event['body']
         if event.get('isBase64Encoded', False):
             body_str = base64.b64decode(body_str).decode('utf-8')
@@ -75,7 +69,6 @@ def handler(event, context):
                 'message': 'Invalid JSON in request body'
             })
 
-        # Extract user_id from Cognito authorizer
         authorizer_claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
         user_id = authorizer_claims.get('sub')
 
@@ -85,7 +78,6 @@ def handler(event, context):
                 'message': 'User not authenticated'
             })
 
-        # Validate required field: faceImage
         face_image = body.get('faceImage')
         if not face_image:
             return create_response(400, {
@@ -93,11 +85,9 @@ def handler(event, context):
                 'message': 'faceImage is required'
             })
 
-        # Extract optional course context
         course_id = body.get('course_id')
         schedule_id = body.get('schedule_id')
 
-        # Validate image size (13MB limit)
         if len(face_image) > 13 * 1024 * 1024:
             return create_response(413, {
                 'error': 'Payload Too Large',
@@ -106,7 +96,6 @@ def handler(event, context):
 
         logger.info(f"Processing attendance for user_id: {user_id}")
 
-        # Check if a student has a registered face
         student = get_student_by_user_id(STUDENTS_TABLE_NAME, user_id)
         if not student:
             return create_response(404, {
@@ -120,11 +109,9 @@ def handler(event, context):
                 'message': 'Please register your face first before marking attendance'
             })
 
-        # Generate tracking ID
         tracking_id = generate_tracking_id()
         logger.info(f"Generated tracking_id: {tracking_id}")
 
-        # Upload face image to S3
         try:
             face_s3_key = upload_attendance_face_to_s3(
                 S3_BUCKET_NAME,
@@ -145,7 +132,6 @@ def handler(event, context):
                 'message': 'Failed to upload face image'
             })
 
-        # Create a processing attendance record in DynamoDB
         try:
             attendance = create_processing_attendance_record(
                 STUDENT_ATTENDANCE_TABLE_NAME,
@@ -163,7 +149,6 @@ def handler(event, context):
                 'message': 'Failed to create attendance record'
             })
 
-        # Send message to SQS queue for face comparison
         try:
             send_to_comparison_queue(
                 FACE_COMPARISON_QUEUE_URL,
@@ -182,7 +167,6 @@ def handler(event, context):
                 'message': 'Failed to queue attendance verification'
             })
 
-        # Return success response with tracking_id
         return create_response(200, {
             'tracking_id': tracking_id,
             'status': 'processing',

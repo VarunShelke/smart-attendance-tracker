@@ -1,15 +1,22 @@
-import json
+"""
+Enroll Student Lambda Handler
+
+Admin-only endpoint to enroll students in courses.
+"""
+
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import boto3
 from botocore.exceptions import ClientError
 
-from student.shared.model.StudentCoursesModel import StudentCourseModel
 from schedule.shared.model.ScheduleModel import ScheduleModel
+from student.shared.model.StudentCoursesModel import StudentCourseModel
+from utils.api_response import APIResponse
 from utils.auth_utils import require_role, UserRole, AuthorizationError, create_forbidden_response
+from utils.request_utils import parse_json_body, extract_path_parameter
 
 # Configure logging
 logger = logging.getLogger()
@@ -47,55 +54,20 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return create_forbidden_response()
 
         # Extract path parameters
-        path_params = event.get('pathParameters') or {}
-        user_id = path_params.get('user_id')
-
-        if not user_id:
-            logger.warning("Missing user_id in path parameters")
-            return {
-                'statusCode': 400,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Credentials': 'true',
-                },
-                'body': json.dumps({
-                    'message': 'Missing user_id in path'
-                })
-            }
+        user_id, error = extract_path_parameter(event, 'user_id')
+        if error:
+            return error
 
         # Parse request body
-        try:
-            body = json.loads(event.get('body', '{}'))
-        except json.JSONDecodeError:
-            logger.warning("Invalid JSON in request body")
-            return {
-                'statusCode': 400,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Credentials': 'true',
-                },
-                'body': json.dumps({
-                    'message': 'Invalid JSON in request body'
-                })
-            }
+        body, error = parse_json_body(event)
+        if error:
+            return error
 
         schedule_ids = body.get('schedule_ids', [])
 
         if not schedule_ids or not isinstance(schedule_ids, list):
             logger.warning("Missing or invalid schedule_ids in request body")
-            return {
-                'statusCode': 400,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Credentials': 'true',
-                },
-                'body': json.dumps({
-                    'message': 'schedule_ids must be a non-empty array'
-                })
-            }
+            return APIResponse.bad_request('schedule_ids must be a non-empty array')
 
         logger.info(f"Enrolling student {user_id} in {len(schedule_ids)} courses")
 
@@ -163,48 +135,17 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     'error': str(e)
                 })
 
-        # Prepare response
-        response_data = {
-            'enrolled': enrolled,
-            'failed': failed
-        }
-
         logger.info(f"Enrollment complete. Enrolled: {len(enrolled)}, Failed: {len(failed)}")
 
-        return {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps(response_data)
-        }
+        return APIResponse.ok({
+            'enrolled': enrolled,
+            'failed': failed
+        })
 
     except ClientError as e:
         logger.error(f"DynamoDB error: {str(e)}")
-        return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps({
-                'message': 'Internal server error while enrolling student'
-            })
-        }
+        return APIResponse.internal_error('Failed to enroll student')
 
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}", exc_info=True)
-        return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps({
-                'message': 'Internal server error'
-            })
-        }
+        return APIResponse.internal_error('An unexpected error occurred')
