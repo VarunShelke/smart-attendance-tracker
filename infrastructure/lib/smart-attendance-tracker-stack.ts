@@ -301,7 +301,7 @@ export class SmartAttendanceTrackerStack extends Stack {
                     cognito.OAuthScope.OPENID,
                     cognito.OAuthScope.PROFILE,
                 ],
-                callbackUrls: ['http://localhost:4173', 'http://localhost:5173'],
+                callbackUrls: ['http://localhost:4173', 'http://localhost:5173', 'https://main.dvr8m2ur8v0tw.amplifyapp.com'],
             },
             preventUserExistenceErrors: true,
             refreshTokenValidity: cdk.Duration.days(30),
@@ -882,7 +882,7 @@ export class SmartAttendanceTrackerStack extends Stack {
 
         // Define CORS configuration for face registration endpoint
         const corsOptions: apigateway.CorsOptions = {
-            allowOrigins: ['http://localhost:5173', 'http://localhost:4173'],
+            allowOrigins: ['http://localhost:5173', 'http://localhost:4173', 'https://main.dvr8m2ur8v0tw.amplifyapp.com'],
             allowMethods: ['POST', 'OPTIONS'],
             allowHeaders: ['Content-Type', 'Authorization', 'X-Api-Key'],
             allowCredentials: true,
@@ -968,7 +968,7 @@ export class SmartAttendanceTrackerStack extends Stack {
         // University API Routes
         // Define CORS configuration for university endpoints
         const universityCorsOptions: apigateway.CorsOptions = {
-            allowOrigins: ['http://localhost:5173', 'http://localhost:4173'],
+            allowOrigins: ['http://localhost:5173', 'http://localhost:4173', 'https://main.dvr8m2ur8v0tw.amplifyapp.com'],
             allowMethods: ['GET', 'POST', 'OPTIONS'],
             allowHeaders: ['Content-Type', 'Authorization', 'X-Api-Key'],
             allowCredentials: true,
