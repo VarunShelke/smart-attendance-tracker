@@ -1,4 +1,9 @@
-import json
+"""
+Get University Lambda Handler
+
+Retrieves university information by university code.
+"""
+
 import logging
 import os
 from typing import Any, Dict
@@ -7,6 +12,8 @@ import boto3
 from botocore.exceptions import ClientError
 
 from university.shared.model.UniversityModel import UniversityModel
+from utils.api_response import APIResponse
+from utils.request_utils import extract_path_parameter
 
 # Configure logging
 logger = logging.getLogger()
@@ -33,7 +40,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     try:
         # Extract university_code from path parameters
-        university_code = event['pathParameters']['university_code']
+        university_code, error = extract_path_parameter(event, 'university_code')
+        if error:
+            return error
         logger.info(f"Fetching university with code: {university_code}")
 
         # Query DynamoDB using GSI (university-code-index)
@@ -48,75 +57,20 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Check if a university exists
         if not response.get('Items') or len(response['Items']) == 0:
             logger.warning(f"University not found for code: {university_code}")
-            return {
-                'statusCode': 404,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Credentials': 'true',
-                },
-                'body': json.dumps({
-                    'message': f'University with code {university_code} not found'
-                })
-            }
+            return APIResponse.not_found(f'University with code {university_code} not found',
+                                         resource_type='University')
 
         # Parse DynamoDB item to UniversityModel
         university_item = response['Items'][0]
         university = UniversityModel.from_dynamodb_item(university_item)
 
-        # Prepare response data
-        university_data = university.to_dict()
-
         logger.info(f"Successfully retrieved university: {university_code}")
-
-        return {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps(university_data)
-        }
-
-    except KeyError as e:
-        logger.error(f"Missing required field in event: {str(e)}")
-        return {
-            'statusCode': 400,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps({
-                'message': 'Invalid request: missing university_code in path'
-            })
-        }
+        return APIResponse.ok(university.to_dict())
 
     except ClientError as e:
         logger.error(f"DynamoDB error: {str(e)}")
-        return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps({
-                'message': 'Internal server error while fetching university'
-            })
-        }
+        return APIResponse.internal_error('Failed to fetch university')
 
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}", exc_info=True)
-        return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps({
-                'message': 'Internal server error'
-            })
-        }
+        return APIResponse.internal_error('An unexpected error occurred')

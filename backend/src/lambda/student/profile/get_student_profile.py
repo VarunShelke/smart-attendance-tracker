@@ -1,4 +1,9 @@
-import json
+"""
+Get Student Profile Lambda Handler
+
+Retrieves student profile information for the authenticated user.
+"""
+
 import logging
 import os
 from typing import Any, Dict
@@ -7,6 +12,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from student.shared.model.StudentModel import StudentModel
+from utils.api_response import APIResponse
 
 # Configure logging
 logger = logging.getLogger()
@@ -39,20 +45,10 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Query DynamoDB for student record
         response = students_table.get_item(Key={'user_id': user_id})
 
-        # Check if a student exists
+        # Check if student exists
         if 'Item' not in response:
             logger.warning(f"Student profile not found for user_id: {user_id}")
-            return {
-                'statusCode': 404,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Credentials': 'true',
-                },
-                'body': json.dumps({
-                    'message': 'Student profile not found'
-                })
-            }
+            return APIResponse.not_found('Student profile not found', resource_type='Student')
 
         # Parse DynamoDB item to StudentModel
         student_item = response['Item']
@@ -70,55 +66,16 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         }
 
         logger.info(f"Successfully retrieved profile for user_id: {user_id}")
-
-        return {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps(profile_data)
-        }
+        return APIResponse.ok(profile_data)
 
     except KeyError as e:
         logger.error(f"Missing required field in event: {str(e)}")
-        return {
-            'statusCode': 400,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps({
-                'message': 'Invalid request: missing authorization claims'
-            })
-        }
+        return APIResponse.bad_request('Invalid request: missing authorization claims')
 
     except ClientError as e:
         logger.error(f"DynamoDB error: {str(e)}")
-        return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps({
-                'message': 'Internal server error while fetching profile'
-            })
-        }
+        return APIResponse.internal_error('Failed to fetch student profile')
 
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}", exc_info=True)
-        return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': 'true',
-            },
-            'body': json.dumps({
-                'message': 'Internal server error'
-            })
-        }
+        return APIResponse.internal_error('An unexpected error occurred')

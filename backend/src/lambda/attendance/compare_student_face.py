@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 from attendance.shared.model import AttendanceStatus
 from attendance.shared.utils.attendance_utils import (
@@ -74,7 +74,7 @@ def process_single_message(message: Dict[str, Any]) -> Dict[str, Any]:
                 'retryable': False
             }
 
-        # Check if attendance record is already verified/failed (idempotency)
+        # Check if the attendance record is already verified/failed (idempotency)
         try:
             attendance = get_attendance_by_user_and_date(
                 STUDENT_ATTENDANCE_TABLE_NAME,
@@ -100,20 +100,14 @@ def process_single_message(message: Dict[str, Any]) -> Dict[str, Any]:
             logger.warning(f"Could not check existing attendance: {str(e)}")
             attendance = None
 
-        # Get student profile to retrieve registered face S3 key
         try:
             student = get_student_by_user_id(STUDENTS_TABLE_NAME, user_id)
         except Exception as e:
             logger.error(f"Failed to get student profile for user {user_id}: {str(e)}")
-            # This is retryable - might be a temporary DynamoDB issue
             raise
 
         if not student:
             logger.error(f"Student not found for user_id: {user_id}")
-            # Student doesn't exist - not retryable, mark as failed
-            # We need to update the attendance record
-            # But we need the attendance_date, which we don't have from SQS message
-            # Let's add it to the message body in process_attendance.py
             return {
                 'success': False,
                 'error': 'Student profile not found',
@@ -142,7 +136,6 @@ def process_single_message(message: Dict[str, Any]) -> Dict[str, Any]:
             f"Attendance: {attendance_face_s3_key}"
         )
 
-        # Perform face comparison using Rekognition
         comparison_result = compare_faces_with_rekognition(
             source_s3_key=registered_face_s3_key,
             target_s3_key=attendance_face_s3_key,
@@ -150,7 +143,6 @@ def process_single_message(message: Dict[str, Any]) -> Dict[str, Any]:
             similarity_threshold=SIMILARITY_THRESHOLD
         )
 
-        # Determine attendance status based on comparison result
         if comparison_result.success:
             attendance_status = AttendanceStatus.VERIFIED
             similarity_score = comparison_result.similarity_score
@@ -169,7 +161,6 @@ def process_single_message(message: Dict[str, Any]) -> Dict[str, Any]:
                 f"Similarity: {similarity_score}"
             )
 
-        # Update attendance record in DynamoDB
         try:
             updated_attendance = update_attendance_status(
                 table_name=STUDENT_ATTENDANCE_TABLE_NAME,
@@ -186,10 +177,8 @@ def process_single_message(message: Dict[str, Any]) -> Dict[str, Any]:
             )
         except Exception as e:
             logger.error(f"Failed to update attendance record: {str(e)}")
-            # This is retryable
             raise
 
-        # Send SNS notification with status and details
         try:
             if SNS_TOPIC_ARN:
                 publish_attendance_notification(
@@ -205,9 +194,7 @@ def process_single_message(message: Dict[str, Any]) -> Dict[str, Any]:
             else:
                 logger.warning("SNS_TOPIC_ARN not configured, skipping notification")
         except Exception as e:
-            # Log error but don't fail the entire operation
             logger.error(f"Failed to send SNS notification: {str(e)}")
-            # Continue - notification failure shouldn't fail attendance processing
 
         return {
             'success': True,
@@ -222,7 +209,6 @@ def process_single_message(message: Dict[str, Any]) -> Dict[str, Any]:
             f"Error processing message {message['messageId']}: {str(e)}",
             exc_info=True
         )
-        # Re-raise to trigger SQS retry
         raise
 
 
@@ -250,7 +236,6 @@ def handler(event, context):
 
             if not result['success']:
                 if result.get('retryable', True):
-                    # Add to batch failures for retry
                     batch_item_failures.append({
                         'itemIdentifier': record['messageId']
                     })
@@ -259,8 +244,6 @@ def handler(event, context):
                         f"{result.get('error')}"
                     )
                 else:
-                    # Non-retryable error - log and continue
-                    # Message will be removed from queue
                     logger.error(
                         f"Message {record['messageId']} failed (non-retryable): "
                         f"{result.get('error')}"
@@ -272,7 +255,6 @@ def handler(event, context):
                 )
 
         except Exception as e:
-            # Unexpected error - add to batch failures for retry
             logger.error(
                 f"Unexpected error processing message {record['messageId']}: {str(e)}",
                 exc_info=True
@@ -281,7 +263,6 @@ def handler(event, context):
                 'itemIdentifier': record['messageId']
             })
 
-    # Return batch item failures for SQS partial batch failure handling
     logger.info(
         f"Batch processing complete - "
         f"Success: {len(event['Records']) - len(batch_item_failures)}, "

@@ -113,12 +113,6 @@ export class SmartAttendanceTrackerStack extends Stack {
                 otp: true,
             },
         });
-        // const cfnUserPool = this.userPool.node.defaultChild as cognito.CfnUserPool;
-        // cfnUserPool.emailConfiguration = {
-        //     emailSendingAccount: 'DEVELOPER',
-        //     sourceArn: `arn:aws:ses:us-east-1:475721340184:identity/shelkevarun@gmail.com`,
-        // };
-        //
 
         // Create Cognito User Pool Groups for role-based access control
         const adminGroup = new cognito.CfnUserPoolGroup(this, 'AdminGroup', {
@@ -922,7 +916,7 @@ export class SmartAttendanceTrackerStack extends Stack {
             defaultCorsPreflightOptions: corsOptions,
         });
 
-        // Add POST method for attendance verification
+        // Add a POST method for attendance verification
         attendanceResource.addMethod('POST', processAttendanceIntegration, {
             authorizer: authorizer,
             authorizationType: apigateway.AuthorizationType.COGNITO,

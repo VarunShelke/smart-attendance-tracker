@@ -7,6 +7,7 @@ on:
     paths:
       - 'infrastructure/**'
       - 'backend/src/lambda/**'
+      - 'frontend/**'
       - '.github/workflows/deploy-cdk.yml'
   workflow_dispatch:
     inputs:
@@ -282,24 +283,257 @@ jobs:
             --output table \
             --region ${{ env.AWS_REGION }} || true
 
+  deploy-frontend:
+    name: Deploy Frontend to Amplify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: deploy
+    if: needs.deploy.result == 'success'
+    environment:
+      name: production
+      url: ${{ steps.verify.outputs.amplify-url }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: GitHubActions-Frontend-Deploy-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 3600
+          mask-aws-account-id: true
+
+      - name: Download CDK outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: cdk-outputs
+          path: infrastructure/
+
+      - name: Extract environment variables from CDK outputs
+        id: extract-env
+        working-directory: infrastructure
+        run: |
+          echo "Extracting CDK outputs..."
+
+          # Parse CDK outputs
+          USER_POOL_ID=$(jq -r '.SmartAttendanceTrackerStack.UserPoolId' cdk-outputs.json)
+          USER_POOL_CLIENT_ID=$(jq -r '.SmartAttendanceTrackerStack.UserPoolClientId' cdk-outputs.json)
+          API_ENDPOINT=$(jq -r '.SmartAttendanceTrackerStack.ApiEndpoint' cdk-outputs.json)
+          API_KEY_VALUE=$(jq -r '.SmartAttendanceTrackerStack.ApiKeyValue' cdk-outputs.json)
+          AMPLIFY_APP_ID=$(jq -r '.SmartAttendanceTrackerStack.AmplifyAppId' cdk-outputs.json)
+          AMPLIFY_DOMAIN=$(jq -r '.SmartAttendanceTrackerStack.AmplifyAppDefaultDomain' cdk-outputs.json)
+
+          # Validate required outputs
+          if [ -z "$USER_POOL_ID" ] || [ -z "$USER_POOL_CLIENT_ID" ] || [ -z "$API_ENDPOINT" ] || [ -z "$AMPLIFY_APP_ID" ]; then
+            echo "Error: Required CDK outputs are missing"
+            exit 1
+          fi
+
+          # Export as GitHub outputs (masked for security)
+          echo "user-pool-id=$USER_POOL_ID" >> $GITHUB_OUTPUT
+          echo "user-pool-client-id=$USER_POOL_CLIENT_ID" >> $GITHUB_OUTPUT
+          echo "api-endpoint=$API_ENDPOINT" >> $GITHUB_OUTPUT
+          echo "::add-mask::$API_KEY_VALUE"
+          echo "api-key=$API_KEY_VALUE" >> $GITHUB_OUTPUT
+          echo "amplify-app-id=$AMPLIFY_APP_ID" >> $GITHUB_OUTPUT
+          echo "amplify-domain=$AMPLIFY_DOMAIN" >> $GITHUB_OUTPUT
+
+          echo "✓ Environment variables extracted successfully"
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: |
+          npm ci --prefer-offline --no-audit
+
+      - name: Build frontend with environment variables
+        working-directory: frontend
+        run: |
+          echo "Building frontend with production configuration..."
+
+          # Build with environment variables
+          VITE_AWS_REGION=${{ env.AWS_REGION }} \
+          VITE_AWS_USER_POOL_ID=${{ steps.extract-env.outputs.user-pool-id }} \
+          VITE_AWS_USER_POOL_CLIENT_ID=${{ steps.extract-env.outputs.user-pool-client-id }} \
+          VITE_API_ENDPOINT=${{ steps.extract-env.outputs.api-endpoint }} \
+          VITE_API_KEY=${{ steps.extract-env.outputs.api-key }} \
+          npm run build
+
+          # Verify build output
+          if [ ! -d "dist" ] || [ ! -f "dist/index.html" ]; then
+            echo "Error: Build output is invalid"
+            exit 1
+          fi
+
+          echo "✓ Frontend build completed successfully"
+
+      - name: Create deployment ZIP
+        working-directory: frontend
+        run: |
+          cd dist
+          zip -r ../frontend-build.zip .
+          cd ..
+
+          echo "Build size: $(du -h frontend-build.zip | cut -f1)"
+
+      - name: Create Amplify deployment
+        id: create-deployment
+        run: |
+          echo "Creating Amplify deployment..."
+
+          DEPLOYMENT_OUTPUT=$(aws amplify create-deployment \
+            --app-id "${{ steps.extract-env.outputs.amplify-app-id }}" \
+            --branch-name "main" \
+            --region ${{ env.AWS_REGION }} \
+            --output json)
+
+          JOB_ID=$(echo "$DEPLOYMENT_OUTPUT" | jq -r '.jobId')
+          ZIP_UPLOAD_URL=$(echo "$DEPLOYMENT_OUTPUT" | jq -r '.zipUploadUrl')
+
+          if [ -z "$JOB_ID" ] || [ -z "$ZIP_UPLOAD_URL" ]; then
+            echo "Error: Failed to create deployment"
+            exit 1
+          fi
+
+          echo "job-id=$JOB_ID" >> $GITHUB_OUTPUT
+          echo "zip-upload-url=$ZIP_UPLOAD_URL" >> $GITHUB_OUTPUT
+          echo "✓ Deployment created with Job ID: $JOB_ID"
+
+      - name: Upload build to S3
+        working-directory: frontend
+        run: |
+          echo "Uploading build artifacts..."
+
+          curl -X PUT \
+            -H "Content-Type: application/zip" \
+            --data-binary @frontend-build.zip \
+            "${{ steps.create-deployment.outputs.zip-upload-url }}"
+
+          if [ $? -ne 0 ]; then
+            echo "Error: Failed to upload build"
+            exit 1
+          fi
+
+          echo "✓ Build uploaded successfully"
+
+      - name: Start Amplify deployment
+        run: |
+          echo "Starting Amplify deployment..."
+
+          aws amplify start-deployment \
+            --app-id "${{ steps.extract-env.outputs.amplify-app-id }}" \
+            --branch-name "main" \
+            --job-id "${{ steps.create-deployment.outputs.job-id }}" \
+            --region ${{ env.AWS_REGION }}
+
+          echo "✓ Deployment started"
+
+      - name: Monitor deployment status
+        id: monitor
+        run: |
+          echo "Monitoring deployment progress..."
+
+          MAX_ATTEMPTS=90  # 15 minutes with 10-second intervals
+          ATTEMPT=0
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            JOB_STATUS=$(aws amplify get-job \
+              --app-id "${{ steps.extract-env.outputs.amplify-app-id }}" \
+              --branch-name "main" \
+              --job-id "${{ steps.create-deployment.outputs.job-id }}" \
+              --region ${{ env.AWS_REGION }} \
+              --query 'job.summary.status' \
+              --output text)
+
+            echo "Deployment status: $JOB_STATUS (attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS)"
+
+            if [ "$JOB_STATUS" = "SUCCEED" ]; then
+              echo "✓ Deployment completed successfully"
+              exit 0
+            elif [ "$JOB_STATUS" = "FAILED" ] || [ "$JOB_STATUS" = "CANCELLED" ]; then
+              echo "Error: Deployment failed with status: $JOB_STATUS"
+
+              # Get job details for debugging
+              aws amplify get-job \
+                --app-id "${{ steps.extract-env.outputs.amplify-app-id }}" \
+                --branch-name "main" \
+                --job-id "${{ steps.create-deployment.outputs.job-id }}" \
+                --region ${{ env.AWS_REGION }} \
+                --query 'job.steps[*].[stepName,status,statusReason]' \
+                --output table
+
+              exit 1
+            fi
+
+            sleep 10
+            ATTEMPT=$((ATTEMPT + 1))
+          done
+
+          echo "Error: Deployment timed out after 15 minutes"
+          exit 1
+
+      - name: Verify deployment
+        id: verify
+        run: |
+          AMPLIFY_URL="https://main.${{ steps.extract-env.outputs.amplify-domain }}"
+
+          echo "Verifying deployment at: $AMPLIFY_URL"
+          echo "amplify-url=$AMPLIFY_URL" >> $GITHUB_OUTPUT
+
+          # Wait for DNS propagation
+          sleep 30
+
+          # Check HTTP status
+          HTTP_STATUS=$(curl -o /dev/null -s -w "%{http_code}" "$AMPLIFY_URL" || echo "000")
+
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo "✓ App is accessible (HTTP $HTTP_STATUS)"
+          else
+            echo "Warning: App returned HTTP status $HTTP_STATUS (may be transient)"
+          fi
+
+          # Output console link
+          echo "Amplify Console: https://console.aws.amazon.com/amplify/home?region=${{ env.AWS_REGION }}#/${{ steps.extract-env.outputs.amplify-app-id }}/main/${{ steps.create-deployment.outputs.job-id }}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-build
+          path: frontend/frontend-build.zip
+          retention-days: 30
+
   notify:
     name: Notify Deployment Status
     runs-on: ubuntu-latest
-    needs: [ deploy ]
+    needs: [ deploy, deploy-frontend ]
     if: always()
 
     steps:
       - name: Deployment Success
-        if: needs.deploy.result == 'success'
+        if: needs.deploy.result == 'success' && needs.deploy-frontend.result == 'success'
         run: |
-          echo "✅ CDK deployment completed successfully"
+          echo "✅ Deployment completed successfully"
+          echo "Backend: CDK stack deployed"
+          echo "Frontend: Amplify app deployed"
           echo "Deployment triggered by: ${{ github.actor }}"
           echo "Commit: ${{ github.sha }}"
 
       - name: Deployment Failure
-        if: needs.deploy.result == 'failure'
+        if: needs.deploy.result == 'failure' || needs.deploy-frontend.result == 'failure'
         run: |
-          echo "❌ CDK deployment failed"
+          echo "❌ Deployment failed"
+          echo "Backend status: ${{ needs.deploy.result }}"
+          echo "Frontend status: ${{ needs.deploy-frontend.result }}"
           echo "Deployment triggered by: ${{ github.actor }}"
           echo "Commit: ${{ github.sha }}"
           exit 1
@@ -307,4 +541,4 @@ jobs:
       - name: Deployment Skipped
         if: needs.deploy.result == 'skipped'
         run: |
-          echo "⏭️ CDK deployment skipped (no infrastructure changes detected)"
+          echo "⏭️ Deployment skipped (no changes detected)"
