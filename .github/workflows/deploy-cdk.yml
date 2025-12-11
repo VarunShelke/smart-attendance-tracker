@@ -155,6 +155,14 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
+      - name: Debug Role ARN
+        run: |
+          echo "Role ARN length: ${#AWS_DEPLOY_ROLE_ARN}"
+          echo "Role ARN (first 30 chars): ${AWS_DEPLOY_ROLE_ARN:0:30}"
+          echo "Role ARN (last 30 chars): ${AWS_DEPLOY_ROLE_ARN: -30}"
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -319,6 +327,14 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
+
+      - name: Debug Role ARN
+        run: |
+          echo "Role ARN length: ${#AWS_DEPLOY_ROLE_ARN}"
+          echo "Role ARN (first 30 chars): ${AWS_DEPLOY_ROLE_ARN:0:30}"
+          echo "Role ARN (last 30 chars): ${AWS_DEPLOY_ROLE_ARN: -30}"
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
