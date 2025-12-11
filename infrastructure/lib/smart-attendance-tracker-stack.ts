@@ -114,7 +114,6 @@ export class SmartAttendanceTrackerStack extends Stack {
             },
         });
 
-        // Create Cognito User Pool Groups for role-based access control
         const adminGroup = new cognito.CfnUserPoolGroup(this, 'AdminGroup', {
             userPoolId: this.userPool.userPoolId,
             groupName: 'Admin',
@@ -136,7 +135,6 @@ export class SmartAttendanceTrackerStack extends Stack {
             precedence: 20,
         });
 
-        // Create an S3 bucket for storing face registration images
         this.studentImagesBucket = new s3.Bucket(this, 'StudentImagesBucket', {
             versioned: false,
             encryption: s3.BucketEncryption.S3_MANAGED,

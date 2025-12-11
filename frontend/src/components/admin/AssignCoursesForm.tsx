@@ -17,10 +17,10 @@ interface AssignCoursesFormProps {
 }
 
 export const AssignCoursesForm: React.FC<AssignCoursesFormProps> = ({
-    student,
-    onSuccess,
-    onCancel,
-}) => {
+                                                                        student,
+                                                                        onSuccess,
+                                                                        onCancel,
+                                                                    }) => {
     const {schedules, isLoading: schedulesLoading} = useSchedulesList();
     const [selectedScheduleIds, setSelectedScheduleIds] = useState<string[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);

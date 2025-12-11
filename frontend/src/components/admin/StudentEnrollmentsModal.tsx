@@ -6,7 +6,7 @@
  * @module components/admin/StudentEnrollmentsModal
  */
 
-import React, {useState, useEffect} from 'react';
+import React, {useEffect, useState} from 'react';
 import {useStudentEnrollments} from '../../hooks/useStudentEnrollments';
 import {AssignCoursesForm} from './AssignCoursesForm';
 import type {Student} from '../../services/api/students';
@@ -19,11 +19,11 @@ interface StudentEnrollmentsModalProps {
 }
 
 export const StudentEnrollmentsModal: React.FC<StudentEnrollmentsModalProps> = ({
-    student,
-    isOpen,
-    onClose,
-    onEnrollmentsUpdated,
-}) => {
+                                                                                    student,
+                                                                                    isOpen,
+                                                                                    onClose,
+                                                                                    onEnrollmentsUpdated,
+                                                                                }) => {
     const {enrollments, isLoading, error, loadEnrollments, refresh} = useStudentEnrollments();
     const [showAssignCourses, setShowAssignCourses] = useState(false);
 
@@ -52,7 +52,8 @@ export const StudentEnrollmentsModal: React.FC<StudentEnrollmentsModalProps> = (
                         className="text-gray-400 hover:text-gray-600 focus:outline-none"
                     >
                         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                  d="M6 18L18 6M6 6l12 12"/>
                         </svg>
                     </button>
                 </div>
@@ -62,7 +63,8 @@ export const StudentEnrollmentsModal: React.FC<StudentEnrollmentsModalProps> = (
                     {/* Loading State */}
                     {isLoading && (
                         <div className="text-center py-8">
-                            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                            <div
+                                className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
                             <p className="mt-2 text-gray-600">Loading enrollments...</p>
                         </div>
                     )}
@@ -111,7 +113,8 @@ export const StudentEnrollmentsModal: React.FC<StudentEnrollmentsModalProps> = (
                                         <div className="flex justify-between items-start">
                                             <div>
                                                 <h4 className="font-semibold text-gray-900">{enrollment.course_name}</h4>
-                                                <p className="text-sm text-gray-600">Course ID: {enrollment.course_id}</p>
+                                                <p className="text-sm text-gray-600">Course
+                                                    ID: {enrollment.course_id}</p>
                                                 <p className="text-sm text-gray-600">Schedule: {enrollment.schedule_id}</p>
                                             </div>
                                             <span
