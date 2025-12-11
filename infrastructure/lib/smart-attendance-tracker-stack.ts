@@ -368,7 +368,7 @@ export class SmartAttendanceTrackerStack extends Stack {
                 },
                 {
                     name: 'VITE_API_ENDPOINT',
-                    value: this.api.url,
+                    value: this.api.url.replace(/\/$/, ''),  // Remove trailing slash to prevent double slash in API URLs
                 }
             ],
             customRules: [
