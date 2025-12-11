@@ -195,6 +195,14 @@ jobs:
           path: infrastructure/cdk-diff.txt
           retention-days: 30
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up QEMU for multi-platform builds
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm64
+
       - name: CDK deploy
         id: deploy
         working-directory: infrastructure
