@@ -339,7 +339,7 @@ export class SmartAttendanceTrackerStack extends Stack {
             },
             defaultCorsPreflightOptions: {
                 allowOrigins: [
-                    'http://localhost:5173', 'http://localhost:4173'
+                    'http://localhost:5173', 'http://localhost:4173', 'https://main.dvr8m2ur8v0tw.amplifyapp.com'
                 ],
                 allowMethods: apigateway.Cors.ALL_METHODS,
                 allowHeaders: ['Content-Type', 'Authorization', 'X-Api-Key'],
