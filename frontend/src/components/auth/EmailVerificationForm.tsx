@@ -56,7 +56,6 @@ const EmailVerificationForm: React.FC<EmailVerificationFormProps> = ({email, pas
         return () => clearTimeout(timer);
     }, [isSuccess, navigate, email]);
 
-    // Mask email for privacy (show first char and domain)
     const maskEmail = (email: string): string => {
         const [localPart, domain] = email.split('@');
         if (!domain) return email;

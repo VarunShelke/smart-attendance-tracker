@@ -83,7 +83,7 @@ class APIResponse:
     """
     Centralized API response builder for AWS API Gateway Lambda handlers.
 
-    Provides consistent response structure and simplifies response creation
+    Provides a consistent response structure and simplifies response creation
     throughout the application. All methods return API Gateway-compatible
     response dictionaries.
     """
@@ -173,11 +173,9 @@ class APIResponse:
             return APIResponse.ok({'user_id': '123'}, message='User retrieved')
             # Returns: {"user_id": "123", "message": "User retrieved"}
         """
-        # If no data and no message, return empty body
         if data is None and message is None:
             return APIResponse._build_response(HTTPStatus.OK, {}, headers)
 
-        # If only message, return just message
         if data is None and message:
             return APIResponse._build_response(HTTPStatus.OK, {'message': message}, headers)
 

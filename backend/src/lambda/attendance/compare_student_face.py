@@ -160,7 +160,6 @@ def process_single_message(message: Dict[str, Any]) -> Dict[str, Any]:
                 f"Error: {error_message}, "
                 f"Similarity: {similarity_score}"
             )
-
         try:
             updated_attendance = update_attendance_status(
                 table_name=STUDENT_ATTENDANCE_TABLE_NAME,
