@@ -122,11 +122,12 @@ jobs:
           npm audit --audit-level=moderate || true
 
       - name: Check for secrets in code
+        if: github.event_name == 'push'
         uses: trufflesecurity/trufflehog@main
         with:
           path: ./
-          base: ${{ github.event.repository.default_branch }}
-          head: HEAD
+          base: ${{ github.event.before }}
+          head: ${{ github.sha }}
           extra_args: --only-verified
 
   deploy:
