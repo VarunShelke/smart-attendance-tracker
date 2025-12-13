@@ -211,7 +211,7 @@ export class SmartAttendanceTrackerStack extends Stack {
             deletionProtection: false,
         });
 
-        // Create Universities DynamoDB table for storing university information
+        // Create an Universities DynamoDB table for storing university information
         this.universitiesTable = new dynamodb.Table(this, 'UniversitiesTable', {
             tableName: 'attendance-tracker-universities',
             partitionKey: {
@@ -233,7 +233,7 @@ export class SmartAttendanceTrackerStack extends Stack {
             partitionKey: {name: 'university_code', type: dynamodb.AttributeType.STRING},
         });
 
-        // Create StudentCourses DynamoDB table for storing student course enrollments
+        // Create a StudentCourses DynamoDB table for storing student course enrollments
         this.studentCoursesTable = new dynamodb.Table(this, 'StudentCoursesTable', {
             tableName: 'attendance-tracker-student-courses',
             partitionKey: {
@@ -1208,7 +1208,7 @@ export class SmartAttendanceTrackerStack extends Stack {
         });
 
         new cdk.CfnOutput(this, 'ApiEndpoint', {
-            value: this.api.url,
+            value: this.api.url.replace(/\/$/, ''),  // Remove trailing slash to prevent double slash in API URLs
             description: 'API Gateway endpoint URL',
             exportName: 'SmartAttendanceApiEndpoint',
         });
