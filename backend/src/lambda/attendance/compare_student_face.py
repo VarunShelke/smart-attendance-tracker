@@ -63,7 +63,7 @@ def process_single_message(message: Dict[str, Any]) -> Dict[str, Any]:
                 'retryable': False
             }
 
-        # Get attendance_date from message
+        # Get attendance_date from a message
         attendance_date = body.get('attendance_date')
         if not attendance_date:
             logger.error(f"attendance_date missing from message for tracking_id: {tracking_id}")
